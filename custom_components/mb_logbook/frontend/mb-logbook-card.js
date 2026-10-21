@@ -115,7 +115,22 @@ class MBLogbookCard extends HTMLElement {
     return { color, gradualOpacity: 0, fullDatetime: false, points: pts };
   }
 
-  async _drawMap(paths) {
+  /** ha-map only auto-fits to entities and zones, not paths, so fit explicitly. */
+  _fit(map, paths) {
+    const pts = paths.flatMap((p) => p.points);
+    if (!pts.length) return;
+    const lats = pts.map((p) => p.latitude);
+    const lons = pts.map((p) => p.longitude);
+    map.fitBounds(
+      [
+        [Math.min(...lats), Math.min(...lons)],
+        [Math.max(...lats), Math.max(...lons)],
+      ],
+      { zoom: 17, pad: 0.15 }
+    );
+  }
+
+  async _drawMap(paths, focus) {
     const box = this.shadowRoot.getElementById("mapbox");
     if (!box) return;
     if (!(await this._ensureMap())) {
@@ -126,12 +141,13 @@ class MBLogbookCard extends HTMLElement {
     if (!map) {
       map = document.createElement("ha-map");
       map.hass = this._hass;
-      map.autoFit = true;
+      map.autoFit = false; // we fit to the route/place ourselves
       map.fitZones = false;
       box.innerHTML = "";
       box.appendChild(map);
     }
     map.paths = paths;
+    this._fit(map, focus || paths);
     this._map = map;
   }
 
@@ -498,18 +514,23 @@ class MBLogbookCard extends HTMLElement {
         name: `${this._time(trip.start_ts)} → ${this._time(trip.end_ts)}`,
         points: points.map((p) => ({ timestamp: new Date(p[0] * 1000), latitude: p[1], longitude: p[2] })),
       });
-    // While naming one end, outline what the chosen radius will cover.
+    // While naming one end, outline what the chosen radius will cover and zoom to it.
+    let focus = null;
     if (this._naming?.kind === "trip" && this._naming.id === id) {
       const lat = this._naming.end === "start" ? trip.start_lat : trip.end_lat;
       const lon = this._naming.end === "start" ? trip.start_lon : trip.end_lon;
       const r = Number(this.shadowRoot.getElementById("pradius")?.value || 100);
-      if (lat != null) paths.push(this._circle(lat, lon, r));
+      if (lat != null) {
+        const circle = this._circle(lat, lon, r);
+        paths.push(circle);
+        focus = [circle];
+      }
     }
     if (!paths.length) {
       box.innerHTML = `<div class="pad dim">No route recorded for this trip.</div>`;
       return;
     }
-    await this._drawMap(paths);
+    await this._drawMap(paths, focus);
   }
 }
 
@@ -551,7 +572,7 @@ MBLogbookCard.css = `
   #mapbox ha-map { height: 100%; display: block; }
 `;
 
-const CARD_VERSION = "0.3.1";
+const CARD_VERSION = "0.3.2";
 
 if (!customElements.get("mb-logbook-card")) {
   customElements.define("mb-logbook-card", MBLogbookCard);
