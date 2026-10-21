@@ -78,6 +78,7 @@ class MBLogbookCard extends HTMLElement {
     this._places = places;
     this._open = null;
     this._naming = null;
+    this._edit = null;
     this._render();
   }
 
@@ -97,68 +98,121 @@ class MBLogbookCard extends HTMLElement {
           <td>${admin ? `<select class=pr>${opts}</select>` : Math.round(p.radius_m) + " m"}</td>
           <td class=n>${p.uses}</td>
           <td class=n><button class=pmap>${this._openPlace === p.id ? "Hide map" : "Map"}</button>${admin ? ` <button class=psv>Save</button> <button class=pdel>Delete</button>` : ""}</td>
-        </tr>${this._openPlace === p.id ? `<tr class=maprow><td colspan=4><div id=mapbox class=small></div></td></tr>` : ""}`;
+        </tr>${this._openPlace === p.id ? `<tr class=maprow><td colspan=4><div class="dim">Drag the pin to move this place or the circle's edge to resize it, then press Save.</div><div id=mapbox class=small></div></td></tr>` : ""}`;
       })
       .join("");
   }
 
-  /** A ring of points approximating a circle, drawn as a closed path. */
-  _circle(lat, lon, radiusM, color = "var(--accent-color, #fab387)") {
-    const pts = [];
+  /** [[south, west], [north, east]] around a set of [lat, lon] points. */
+  _bounds(points) {
+    const lats = points.map((p) => p[0]);
+    const lons = points.map((p) => p[1]);
+    return [
+      [Math.min(...lats), Math.min(...lons)],
+      [Math.max(...lats), Math.max(...lons)],
+    ];
+  }
+
+  _circleBounds(lat, lon, radiusM) {
     const dLat = radiusM / 111320;
     const dLon = radiusM / (111320 * Math.cos((lat * Math.PI) / 180));
-    const now = new Date();
-    for (let i = 0; i <= 48; i++) {
-      const a = (i / 48) * 2 * Math.PI;
-      pts.push({ timestamp: now, latitude: lat + dLat * Math.sin(a), longitude: lon + dLon * Math.cos(a) });
-    }
-    return { color, gradualOpacity: 0, fullDatetime: false, points: pts };
+    return this._bounds([
+      [lat - dLat, lon - dLon],
+      [lat + dLat, lon + dLon],
+    ]);
   }
 
-  /** ha-map only auto-fits to entities and zones, not paths, so fit explicitly. */
-  _fit(map, paths) {
-    const pts = paths.flatMap((p) => p.points);
-    if (!pts.length) return;
-    const lats = pts.map((p) => p.latitude);
-    const lons = pts.map((p) => p.longitude);
-    map.fitBounds(
-      [
-        [Math.min(...lats), Math.min(...lons)],
-        [Math.max(...lats), Math.max(...lons)],
-      ],
-      { zoom: 17, pad: 0.15 }
-    );
+  /** The map does its own first positioning when it finishes loading; fit after that. */
+  async _whenLoaded(map) {
+    for (let i = 0; i < 60 && !map._loaded; i++) await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 150));
   }
 
-  async _drawMap(paths, focus) {
+  _editable() {
+    const e = this._edit;
+    return [
+      {
+        id: "place",
+        location: [e.lat, e.lon],
+        radius: e.radius,
+        title: e.title || "New place",
+        locationEditable: true,
+        radiusEditable: true,
+      },
+    ];
+  }
+
+  /**
+   * Draw a map in #mapbox: an optional route, and an optional place being
+   * edited (drag the pin to move it, drag the circle edge to resize it).
+   */
+  async _drawMap({ paths = [], edit = false } = {}) {
     const box = this.shadowRoot.getElementById("mapbox");
     if (!box) return;
     if (!(await this._ensureMap())) {
       box.innerHTML = `<div class="pad dim">Map unavailable.</div>`;
       return;
     }
-    let map = box.querySelector("ha-map");
-    if (!map) {
-      map = document.createElement("ha-map");
-      map.hass = this._hass;
-      map.autoFit = false; // we fit to the route/place ourselves
-      map.fitZones = false;
-      box.innerHTML = "";
-      box.appendChild(map);
-    }
+    const map = document.createElement("ha-map");
+    map.hass = this._hass;
+    map.autoFit = false; // we position it ourselves once it has loaded
+    map.fitZones = false;
     map.paths = paths;
-    this._fit(map, focus || paths);
+    map.editableLocations = edit ? this._editable() : [];
+    map.addEventListener("editable-location-moved", (ev) => {
+      this._edit.lat = ev.detail.location[0];
+      this._edit.lon = ev.detail.location[1];
+    });
+    map.addEventListener("editable-location-resized", (ev) => {
+      this._edit.radius = Math.max(20, Math.round(ev.detail.radius));
+      this._syncRadius();
+    });
+    box.innerHTML = "";
+    box.appendChild(map);
     this._map = map;
+    await this._whenLoaded(map);
+    if (this._map !== map) return; // redrawn meanwhile
+    const bounds = edit
+      ? this._circleBounds(this._edit.lat, this._edit.lon, this._edit.radius)
+      : paths.length
+        ? this._bounds(paths.flatMap((p) => p.points.map((q) => [q.latitude, q.longitude])))
+        : null;
+    if (bounds) map.fitBounds(bounds, { zoom: 17, pad: 0.15 });
+  }
+
+  /** Radius picked from the list: resize the circle without moving the view. */
+  _setEditRadius(r) {
+    if (!this._edit) return;
+    this._edit.radius = r;
+    if (this._map) this._map.editableLocations = this._editable();
+  }
+
+  /** Circle dragged to a new size: show it in the radius list. */
+  _syncRadius() {
+    const sel =
+      this.shadowRoot.getElementById("pradius") ||
+      this.shadowRoot.querySelector(`tr[data-place="${this._openPlace}"] .pr`);
+    if (!sel) return;
+    const r = this._edit.radius;
+    if (![...sel.options].some((o) => Number(o.value) === r)) {
+      const opt = document.createElement("option");
+      opt.value = r;
+      opt.textContent = `${r} m`;
+      sel.appendChild(opt);
+    }
+    sel.value = String(r);
   }
 
   _showPlaceMap(place) {
-    this._drawMap([this._circle(place.lat, place.lon, place.radius_m)]);
+    this._edit = { lat: place.lat, lon: place.lon, radius: Math.round(place.radius_m), title: place.name };
+    this._drawMap({ edit: true });
   }
 
-  /** Map for naming a charge location: the point and the chosen radius. */
+  /** Map for naming a charge location. */
   _showNamingMap(lat, lon) {
     const r = Number(this.shadowRoot.getElementById("pradius")?.value || 100);
-    this._drawMap([this._circle(lat, lon, r)]);
+    this._edit = { lat, lon, radius: r };
+    this._drawMap({ edit: true });
   }
 
   async _savePlace(body) {
@@ -239,7 +293,7 @@ class MBLogbookCard extends HTMLElement {
         <select id=pradius title="Anything within this distance gets the name">${radii}</select>
         <button class=primary id=psave data-lat="${lat}" data-lon="${lon}">Save</button>
         <button id=pcancel>Cancel</button>
-        <div class=dim>Applies to every trip and charge that starts or ends within the radius, past and future.</div>
+        <div class=dim>Drag the pin on the map to move the place, or the circle's edge to resize it. The name applies to every trip and charge that starts or ends inside the circle, past and future.</div>
       </div>`;
   }
 
@@ -432,23 +486,19 @@ class MBLogbookCard extends HTMLElement {
         root.getElementById("pname")?.focus();
       })
     );
-    root.getElementById("pradius")?.addEventListener("change", () => {
-      if (this._naming?.kind === "trip") this._showMap(this._naming.id);
-      else if (this._naming) {
-        const c = this._charges.find((x) => x.id === this._naming.id);
-        this._showNamingMap(c.lat, c.lon);
-      }
-    });
+    root.getElementById("pradius")?.addEventListener("change", (e) => this._setEditRadius(Number(e.target.value)));
     const save = root.getElementById("psave");
     if (save) {
       const submit = () => {
         const name = root.getElementById("pname").value.trim();
         if (!name) return root.getElementById("pname").focus();
+        // Use the pin/circle as positioned on the map, if it was moved.
+        const e = this._edit;
         this._savePlace({
           name,
-          lat: Number(save.dataset.lat),
-          lon: Number(save.dataset.lon),
-          radius_m: Number(root.getElementById("pradius").value),
+          lat: e ? e.lat : Number(save.dataset.lat),
+          lon: e ? e.lon : Number(save.dataset.lon),
+          radius_m: e ? e.radius : Number(root.getElementById("pradius").value),
         });
       };
       save.addEventListener("click", submit);
@@ -467,12 +517,19 @@ class MBLogbookCard extends HTMLElement {
         if (this._openPlace != null) this._showPlaceMap(p);
       });
       tr.querySelector(".pr")?.addEventListener("change", (e) => {
-        if (this._openPlace === p.id) this._showPlaceMap({ ...p, radius_m: Number(e.target.value) });
+        if (this._openPlace === p.id) this._setEditRadius(Number(e.target.value));
       });
       tr.querySelector(".psv")?.addEventListener("click", () => {
         const name = tr.querySelector(".pn").value.trim();
         if (!name) return;
-        this._savePlace({ place_id: p.id, name, lat: p.lat, lon: p.lon, radius_m: Number(tr.querySelector(".pr").value) });
+        const e = this._openPlace === p.id ? this._edit : null; // moved/resized on the map
+        this._savePlace({
+          place_id: p.id,
+          name,
+          lat: e ? e.lat : p.lat,
+          lon: e ? e.lon : p.lon,
+          radius_m: e ? e.radius : Number(tr.querySelector(".pr").value),
+        });
       });
       tr.querySelector(".pdel")?.addEventListener("click", async () => {
         if (!confirm(`Delete “${p.name}”? Trips there will show as unnamed again.`)) return;
@@ -514,23 +571,22 @@ class MBLogbookCard extends HTMLElement {
         name: `${this._time(trip.start_ts)} → ${this._time(trip.end_ts)}`,
         points: points.map((p) => ({ timestamp: new Date(p[0] * 1000), latitude: p[1], longitude: p[2] })),
       });
-    // While naming one end, outline what the chosen radius will cover and zoom to it.
-    let focus = null;
+    // While naming one end, show it as an editable place and zoom to it.
+    let edit = false;
     if (this._naming?.kind === "trip" && this._naming.id === id) {
       const lat = this._naming.end === "start" ? trip.start_lat : trip.end_lat;
       const lon = this._naming.end === "start" ? trip.start_lon : trip.end_lon;
-      const r = Number(this.shadowRoot.getElementById("pradius")?.value || 100);
       if (lat != null) {
-        const circle = this._circle(lat, lon, r);
-        paths.push(circle);
-        focus = [circle];
+        const r = Number(this.shadowRoot.getElementById("pradius")?.value || 100);
+        this._edit = { lat, lon, radius: r };
+        edit = true;
       }
     }
-    if (!paths.length) {
+    if (!paths.length && !edit) {
       box.innerHTML = `<div class="pad dim">No route recorded for this trip.</div>`;
       return;
     }
-    await this._drawMap(paths, focus);
+    await this._drawMap({ paths, edit });
   }
 }
 
@@ -572,7 +628,7 @@ MBLogbookCard.css = `
   #mapbox ha-map { height: 100%; display: block; }
 `;
 
-const CARD_VERSION = "0.3.4";
+const CARD_VERSION = "0.4.0";
 
 if (!customElements.get("mb-logbook-card")) {
   customElements.define("mb-logbook-card", MBLogbookCard);

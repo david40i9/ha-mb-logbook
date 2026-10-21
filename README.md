@@ -40,7 +40,7 @@ days: 30          # 7, 30, 90 or 365
 # car: EQS        # optional: lock the card to one car (by name)
 ```
 
-Click a trip to show its route. Click **unnamed · name it** next to a start or end to name that place (admins only).
+Click a trip to show its route. Click **unnamed · name it** next to a start or end to name that place (admins only). On the map, drag the pin to move the place and drag the circle's edge to resize it; the Places tab lets you adjust existing places the same way.
 
 ## Sensors (per car)
 
