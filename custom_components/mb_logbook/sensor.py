@@ -155,6 +155,7 @@ def _descriptions(miles: bool, currency: str | None) -> list[LogbookSensorDescri
     descs = [
         LogbookSensorDescription(key="trips_month", value=lambda d: d.get("trips_month")),
         LogbookSensorDescription(key="distance_month", native_unit_of_measurement=dist_unit,
+                                 suggested_unit_of_measurement=dist_unit, suggested_display_precision=1,
                                  device_class=SensorDeviceClass.DISTANCE,
                                  value=lambda d: d.get("distance_month")),
         LogbookSensorDescription(key="energy_month",
@@ -165,6 +166,7 @@ def _descriptions(miles: bool, currency: str | None) -> list[LogbookSensorDescri
                                  state_class=SensorStateClass.MEASUREMENT,
                                  value=lambda d: d.get("efficiency_month")),
         LogbookSensorDescription(key="last_trip_distance", native_unit_of_measurement=dist_unit,
+                                 suggested_unit_of_measurement=dist_unit, suggested_display_precision=1,
                                  device_class=SensorDeviceClass.DISTANCE,
                                  value=lambda d: d.get("last_trip_distance"),
                                  attrs=_trip_attrs),
