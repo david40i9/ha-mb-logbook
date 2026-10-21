@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
-import statistics
 import time
 from typing import Any
 
@@ -88,7 +87,9 @@ class Stats:
         last_kwh = None
         if last and last.get("soc_start") is not None and last.get("soc_end") is not None:
             last_kwh = max(last["soc_start"] - last["soc_end"], 0) / 100 * cap if cap else None
-        rates = [drop / hours * 24 for hours, drop in raw["parks"] if hours > 0]
+        # Battery % comes in whole steps, so pool the parks: total lost / total time.
+        park_hours = sum(h for h, _ in raw["parks"])
+        drain = sum(d for _, d in raw["parks"]) / park_hours * 24 if park_hours else None
         self.data = {
             "trips_month": month["trips"],
             "distance_month": self.dist(month["distance_km"]),
@@ -100,8 +101,8 @@ class Stats:
                 self.efficiency(last["distance_km"], last_kwh) if last and last_kwh else None
             ),
             "last_trip": last,
-            "idle_drain": round(statistics.median(rates), 2) if rates else None,
-            "idle_samples": len(rates),
+            "idle_drain": round(drain, 2) if drain is not None else None,
+            "idle_samples": len(raw["parks"]),
             "last_charge_energy": (
                 (charge.get("kwh_meter") or charge.get("kwh_car")) if charge else None
             ),

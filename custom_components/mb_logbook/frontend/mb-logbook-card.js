@@ -281,11 +281,11 @@ class MBLogbookCard extends HTMLElement {
         kmKnown += x.distance_km;
       }
     }
-    const rates = t
-      .filter((x) => !x.park_charged && x.park_hours >= 6 && x.park_soc_drop != null)
-      .map((x) => (x.park_soc_drop / x.park_hours) * 24)
-      .sort((a, b) => a - b);
-    const drain = rates.length ? rates[Math.floor(rates.length / 2)] : null;
+    // Battery % only comes in whole steps, so pool the parks (total lost over
+    // total time) rather than averaging per-park rates that are mostly 0.
+    const parks = t.filter((x) => !x.park_charged && x.park_hours >= 6 && x.park_soc_drop != null);
+    const hours = parks.reduce((s, x) => s + x.park_hours, 0);
+    const drain = hours ? (parks.reduce((s, x) => s + x.park_soc_drop, 0) / hours) * 24 : null;
     return [
       ["Trips", t.length],
       ["Distance", this._dist(km, 0)],
@@ -572,7 +572,7 @@ MBLogbookCard.css = `
   #mapbox ha-map { height: 100%; display: block; }
 `;
 
-const CARD_VERSION = "0.3.2";
+const CARD_VERSION = "0.3.3";
 
 if (!customElements.get("mb-logbook-card")) {
   customElements.define("mb-logbook-card", MBLogbookCard);

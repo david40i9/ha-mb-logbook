@@ -44,7 +44,7 @@ Click a trip to show its route. Click **unnamed · name it** next to a start or 
 
 ## Sensors (per car)
 
-Trips, distance, energy and efficiency this month; last trip distance, energy and efficiency; idle drain (median % per day over uncharged parks of 6 h or more in the last 30 days); last charge energy and cost; energy charged and charging cost this month; trip in progress; charging session.
+Trips, distance, energy and efficiency this month; last trip distance, energy and efficiency; idle drain (% per day: battery lost over time parked, across uncharged parks of 6 h or more in the last 30 days); last charge energy and cost; energy charged and charging cost this month; trip in progress; charging session.
 
 ## How trips are detected
 
