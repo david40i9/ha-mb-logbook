@@ -100,6 +100,7 @@ class _Replay:
         lat, lon = (pos[0], pos[1]) if pos else (None, None)
         soc = self._val(CONF_SOC)
         p = self.park
+        drop = round(p["soc"] - soc, 1) if p["soc"] is not None and soc is not None else None
         self.trip = {
             "start_ts": ts,
             "odo_start_km": self._km(CONF_ODOMETER),
@@ -113,10 +114,9 @@ class _Replay:
             "points": [[round(ts), lat, lon]] if pos else [],
             "last_fix": pos[2] if pos else None,
             "park_hours": round((ts - p["ts"]) / 3600, 2) if p["ts"] else None,
-            "park_soc_drop": (
-                round(p["soc"] - soc, 1) if p["soc"] is not None and soc is not None else None
-            ),
-            "park_charged": bool(p["charged"]),
+            "park_soc_drop": drop,
+            # Battery up by 2% or more while parked can only be a charge.
+            "park_charged": bool(p["charged"]) or (drop is not None and drop <= -2),
         }
 
     def end_trip(self) -> None:
@@ -165,7 +165,8 @@ class _Replay:
                 "points": pts,
             }
         )
-        self.park = {"ts": t["off_ts"], "soc": soc_end, "charged": False}
+        # A charge that started before the trip was closed belongs to this park.
+        self.park = {"ts": t["off_ts"], "soc": soc_end, "charged": self.charge is not None}
 
     # ----- charges -----
     def start_charge(self, ts: float) -> None:

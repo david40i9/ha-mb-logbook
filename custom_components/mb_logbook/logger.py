@@ -321,6 +321,7 @@ class CarLogger:
         now = time.time()
         soc = self._soc()
         park_soc = park.get("soc")
+        drop = round(park_soc - soc, 1) if park_soc is not None and soc is not None else None
         self._state["trip"] = {
             "start_ts": now,
             "odo_start_km": self._odo_km(),
@@ -334,10 +335,9 @@ class CarLogger:
             "points": [[round(now), lat, lon]] if pos else [],
             "last_fix": pos[2] if pos else None,
             "park_hours": round((now - park["ts"]) / 3600, 2) if park.get("ts") else None,
-            "park_soc_drop": (
-                round(park_soc - soc, 1) if park_soc is not None and soc is not None else None
-            ),
-            "park_charged": bool(park.get("charged")),
+            "park_soc_drop": drop,
+            # Battery up by 2% or more while parked can only be a charge.
+            "park_charged": bool(park.get("charged")) or (drop is not None and drop <= -2),
         }
         self._save()
         self._notify()
@@ -412,7 +412,12 @@ class CarLogger:
             "points": points,
         }
         await self.hass.async_add_executor_job(self.db.add_trip, record)
-        self._state["park"] = {"ts": record["end_ts"], "soc": soc_end, "charged": False}
+        # A charge that started before the trip was closed belongs to this park.
+        self._state["park"] = {
+            "ts": record["end_ts"],
+            "soc": soc_end,
+            "charged": self._state.get("charge") is not None,
+        }
         self._save()
         self._notify()
 
