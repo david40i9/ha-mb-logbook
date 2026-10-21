@@ -1,0 +1,14 @@
+{
+  "domain": "mb_logbook",
+  "name": "MB Logbook",
+  "codeowners": ["@david40i9"],
+  "config_flow": true,
+  "dependencies": ["http", "frontend", "websocket_api", "zone"],
+  "after_dependencies": ["mbapi2020"],
+  "documentation": "https://github.com/david40i9/ha-mb-logbook",
+  "integration_type": "device",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/david40i9/ha-mb-logbook/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

@@ -1,0 +1,83 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add a car",
+        "description": "Pick the car from the Mercedes integration (mbapi2020) to fill in its sensors automatically, or leave it empty to choose them yourself.",
+        "data": { "device_id": "Car" }
+      },
+      "entities": {
+        "title": "Car sensors and settings",
+        "description": "Check the sensors. Battery capacity is the usable size in kWh (for example 66.5 for an EQA 250). The charger meter and price are optional: when set, energy and cost of home charges are credited to this car while it is charging in the home zone.",
+        "data": {
+          "car_name": "Name",
+          "odometer_entity": "Odometer",
+          "trip_distance_entity": "Trip distance counter (distance since start)",
+          "soc_entity": "Battery %",
+          "ignition_entity": "Ignition state",
+          "tracker_entity": "GPS tracker",
+          "range_entity": "Electric range",
+          "charging_entity": "Charging active",
+          "charge_power_entity": "Charging power",
+          "battery_capacity_kwh": "Usable battery capacity",
+          "charger_energy_entity": "Home charger energy meter (total kWh)",
+          "price_entity": "Electricity price (per kWh)",
+          "home_zone": "Home zone",
+          "distance_unit": "Distance unit",
+          "stop_minutes": "Minutes parked before a trip ends",
+          "min_distance_km": "Shortest trip to keep"
+        }
+      }
+    },
+    "error": {
+      "capacity_required": "Enter the usable battery capacity."
+    },
+    "abort": {
+      "already_configured": "This car is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Car sensors and settings",
+        "data": {
+          "odometer_entity": "Odometer",
+          "trip_distance_entity": "Trip distance counter (distance since start)",
+          "soc_entity": "Battery %",
+          "ignition_entity": "Ignition state",
+          "tracker_entity": "GPS tracker",
+          "range_entity": "Electric range",
+          "charging_entity": "Charging active",
+          "charge_power_entity": "Charging power",
+          "battery_capacity_kwh": "Usable battery capacity",
+          "charger_energy_entity": "Home charger energy meter (total kWh)",
+          "price_entity": "Electricity price (per kWh)",
+          "home_zone": "Home zone",
+          "distance_unit": "Distance unit",
+          "stop_minutes": "Minutes parked before a trip ends",
+          "min_distance_km": "Shortest trip to keep"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "trips_month": { "name": "Trips this month" },
+      "distance_month": { "name": "Distance this month" },
+      "energy_month": { "name": "Energy used this month" },
+      "efficiency_month": { "name": "Efficiency this month" },
+      "last_trip_distance": { "name": "Last trip distance" },
+      "last_trip_energy": { "name": "Last trip energy" },
+      "last_trip_efficiency": { "name": "Last trip efficiency" },
+      "idle_drain": { "name": "Idle drain" },
+      "last_charge_energy": { "name": "Last charge energy" },
+      "last_charge_cost": { "name": "Last charge cost" },
+      "charged_month": { "name": "Charged this month" },
+      "charge_cost_month": { "name": "Charging cost this month" }
+    },
+    "binary_sensor": {
+      "trip_active": { "name": "Trip in progress" },
+      "charge_active": { "name": "Charging session" }
+    }
+  }
+}
