@@ -44,7 +44,7 @@ Trips, distance, energy and efficiency this month; last trip distance, energy an
 
 ## How trips are detected
 
-A trip starts when the ignition leaves "off" and ends when it has been off for a few minutes (3 by default). Distance comes from the odometer. Ignition events that don't move the car (for example pre-conditioning) are ignored. The data is stored in `config/mb_logbook.db` (SQLite) and is included in Home Assistant backups.
+A trip starts when the ignition leaves "off" and ends when it has been off for a few minutes (3 by default). Distance comes from the car's 0.1-resolution "distance since start" counter, checked against the odometer (which may only report whole miles). Ignition events that don't move the car (for example pre-conditioning) are ignored. The data is stored in `config/mb_logbook.db` (SQLite) and is included in Home Assistant backups.
 
 ## Limits
 
