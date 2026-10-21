@@ -96,10 +96,53 @@ class MBLogbookCard extends HTMLElement {
           <td>${admin ? `<input class=pn value="${esc(p.name)}" maxlength=60>` : esc(p.name)}</td>
           <td>${admin ? `<select class=pr>${opts}</select>` : Math.round(p.radius_m) + " m"}</td>
           <td class=n>${p.uses}</td>
-          <td class=n>${admin ? `<button class=psv>Save</button> <button class=pdel>Delete</button>` : ""}</td>
-        </tr>`;
+          <td class=n><button class=pmap>${this._openPlace === p.id ? "Hide map" : "Map"}</button>${admin ? ` <button class=psv>Save</button> <button class=pdel>Delete</button>` : ""}</td>
+        </tr>${this._openPlace === p.id ? `<tr class=maprow><td colspan=4><div id=mapbox class=small></div></td></tr>` : ""}`;
       })
       .join("");
+  }
+
+  /** A ring of points approximating a circle, drawn as a closed path. */
+  _circle(lat, lon, radiusM, color = "var(--accent-color, #fab387)") {
+    const pts = [];
+    const dLat = radiusM / 111320;
+    const dLon = radiusM / (111320 * Math.cos((lat * Math.PI) / 180));
+    const now = new Date();
+    for (let i = 0; i <= 48; i++) {
+      const a = (i / 48) * 2 * Math.PI;
+      pts.push({ timestamp: now, latitude: lat + dLat * Math.sin(a), longitude: lon + dLon * Math.cos(a) });
+    }
+    return { color, gradualOpacity: 0, fullDatetime: false, points: pts };
+  }
+
+  async _drawMap(paths) {
+    const box = this.shadowRoot.getElementById("mapbox");
+    if (!box) return;
+    if (!(await this._ensureMap())) {
+      box.innerHTML = `<div class="pad dim">Map unavailable.</div>`;
+      return;
+    }
+    let map = box.querySelector("ha-map");
+    if (!map) {
+      map = document.createElement("ha-map");
+      map.hass = this._hass;
+      map.autoFit = true;
+      map.fitZones = false;
+      box.innerHTML = "";
+      box.appendChild(map);
+    }
+    map.paths = paths;
+    this._map = map;
+  }
+
+  _showPlaceMap(place) {
+    this._drawMap([this._circle(place.lat, place.lon, place.radius_m)]);
+  }
+
+  /** Map for naming a charge location: the point and the chosen radius. */
+  _showNamingMap(lat, lon) {
+    const r = Number(this.shadowRoot.getElementById("pradius")?.value || 100);
+    this._drawMap([this._circle(lat, lon, r)]);
   }
 
   async _savePlace(body) {
@@ -187,6 +230,30 @@ class MBLogbookCard extends HTMLElement {
   // ----- summary ----------------------------------------------------------------------
 
   _summary() {
+    if (this._tab === "places") return "";
+    const tiles = this._tab === "charges" ? this._chargeTiles() : this._tripTiles();
+    return `<div class=tiles>${tiles.map(([k, v]) => `<div class=tile><div class=k>${k}</div><div class=v>${v}</div></div>`).join("")}</div>`;
+  }
+
+  _chargeTiles() {
+    const ch = this._charges;
+    const kwh = ch.reduce((s, c) => s + (c.kwh_meter ?? c.kwh_car ?? 0), 0);
+    const metered = ch.filter((c) => c.kwh_meter && c.cost != null);
+    const mKwh = metered.reduce((s, c) => s + c.kwh_meter, 0);
+    const mCost = metered.reduce((s, c) => s + c.cost, 0);
+    const tiles = [
+      ["Sessions", ch.length],
+      ["Energy added", kwh ? `${kwh.toFixed(0)} kWh` : "–"],
+      ["At home", ch.filter((c) => c.at_home).length],
+    ];
+    if (this._car.has_meter) {
+      tiles.push(["Home charging cost", mCost ? this._money(mCost) : "–"]);
+      tiles.push(["Average per kWh", mKwh ? this._money(mCost / mKwh) : "–"]);
+    }
+    return tiles;
+  }
+
+  _tripTiles() {
     const t = this._trips;
     const km = t.reduce((s, x) => s + x.distance_km, 0);
     let kwh = 0;
@@ -203,19 +270,13 @@ class MBLogbookCard extends HTMLElement {
       .map((x) => (x.park_soc_drop / x.park_hours) * 24)
       .sort((a, b) => a - b);
     const drain = rates.length ? rates[Math.floor(rates.length / 2)] : null;
-    const ch = this._charges;
-    const chKwh = ch.reduce((s, c) => s + (c.kwh_meter ?? c.kwh_car ?? 0), 0);
-    const chCost = ch.reduce((s, c) => s + (c.cost ?? 0), 0);
-    const tiles = [
+    return [
       ["Trips", t.length],
       ["Distance", this._dist(km, 0)],
       ["Energy used", kwh ? `${kwh.toFixed(0)} kWh` : "–"],
       ["Efficiency", this._eff(kmKnown, kwh)],
       ["Idle drain", drain != null ? `${drain.toFixed(2)} %/day` : "–"],
-      ["Charged", chKwh ? `${chKwh.toFixed(0)} kWh` : "–"],
     ];
-    if (this._car.has_meter) tiles.push(["Charging cost", chCost ? this._money(chCost) : "–"]);
-    return tiles.map(([k, v]) => `<div class=tile><div class=k>${k}</div><div class=v>${v}</div></div>`).join("");
   }
 
   // ----- tables -----------------------------------------------------------------------
@@ -259,7 +320,9 @@ class MBLogbookCard extends HTMLElement {
         const kwh = c.kwh_meter ?? c.kwh_car;
         const src = c.kwh_meter != null ? "metered" : "from battery %";
         const naming = this._naming && this._naming.kind === "charge" && this._naming.id === c.id;
-        const formRow = naming ? `<tr class=maprow><td colspan=7>${this._nameForm(c.lat, c.lon)}</td></tr>` : "";
+        const formRow = naming
+          ? `<tr class=maprow><td colspan=7>${this._nameForm(c.lat, c.lon)}<div id=mapbox class=small></div></td></tr>`
+          : "";
         return `<tr>
           <td>${this._when(c.start_ts)}<div class=dim>${this._dur(c.end_ts - c.start_ts)}</div></td>
           <td>${this._place(c.place, c.lat, "charge", c.id)}${c.at_home ? " <span class=chip>home</span>" : ""}</td>
@@ -287,7 +350,10 @@ class MBLogbookCard extends HTMLElement {
             .map((c) => `<button data-car="${c.entry_id}" class="${c.entry_id === this._car.entry_id ? "on" : ""}">${esc(c.name)}${c.trip_active ? " •" : ""}</button>`)
             .join("")}</div>`
         : "";
-    const periods = `<div class=seg>${PERIODS.map(([v, l]) => `<button data-days="${v}" class="${v === this._days ? "on" : ""}">${l}</button>`).join("")}</div>`;
+    const periods =
+      this._tab === "places"
+        ? "<div></div>"
+        : `<div class=seg>${PERIODS.map(([v, l]) => `<button data-days="${v}" class="${v === this._days ? "on" : ""}">${l}</button>`).join("")}</div>`;
     const tabs = `<div class=seg>${[["trips", "Trips"], ["charges", "Charging"], ["places", "Places"]]
       .map(([v, l]) => `<button data-tab="${v}" class="${v === this._tab ? "on" : ""}">${l}</button>`)
       .join("")}</div>`;
@@ -302,7 +368,7 @@ class MBLogbookCard extends HTMLElement {
       <ha-card>
         <div class=head><div class=title>${esc(this._config.title || this._car.name + " logbook")}${this._car.trip_active ? ' <span class="chip live">driving</span>' : ""}${this._car.charge_active ? ' <span class="chip live">charging</span>' : ""}</div>${cars}</div>
         <div class=bar>${periods}${tabs}</div>
-        <div class=tiles>${this._summary()}</div>
+        ${this._summary()}
         <div class=scroll>${table}</div>
       </ha-card>`;
     root.querySelectorAll("button[data-car]").forEach((b) =>
@@ -320,6 +386,9 @@ class MBLogbookCard extends HTMLElement {
     root.querySelectorAll("button[data-tab]").forEach((b) =>
       b.addEventListener("click", () => {
         this._tab = b.dataset.tab;
+        this._naming = null;
+        this._open = null;
+        this._openPlace = null;
         this._render();
       })
     );
@@ -340,9 +409,20 @@ class MBLogbookCard extends HTMLElement {
         if (b.dataset.kind === "trip") this._open = id;
         this._render();
         if (b.dataset.kind === "trip") this._showMap(id);
+        else {
+          const c = this._charges.find((x) => x.id === id);
+          this._showNamingMap(c.lat, c.lon);
+        }
         root.getElementById("pname")?.focus();
       })
     );
+    root.getElementById("pradius")?.addEventListener("change", () => {
+      if (this._naming?.kind === "trip") this._showMap(this._naming.id);
+      else if (this._naming) {
+        const c = this._charges.find((x) => x.id === this._naming.id);
+        this._showNamingMap(c.lat, c.lon);
+      }
+    });
     const save = root.getElementById("psave");
     if (save) {
       const submit = () => {
@@ -365,6 +445,14 @@ class MBLogbookCard extends HTMLElement {
     }
     root.querySelectorAll("tr[data-place]").forEach((tr) => {
       const p = this._places.find((x) => x.id === Number(tr.dataset.place));
+      tr.querySelector(".pmap").addEventListener("click", () => {
+        this._openPlace = this._openPlace === p.id ? null : p.id;
+        this._render();
+        if (this._openPlace != null) this._showPlaceMap(p);
+      });
+      tr.querySelector(".pr")?.addEventListener("change", (e) => {
+        if (this._openPlace === p.id) this._showPlaceMap({ ...p, radius_m: Number(e.target.value) });
+      });
       tr.querySelector(".psv")?.addEventListener("click", () => {
         const name = tr.querySelector(".pn").value.trim();
         if (!name) return;
@@ -401,26 +489,27 @@ class MBLogbookCard extends HTMLElement {
       /* no points */
     }
     points = points.filter((p) => p[1] != null && p[2] != null);
-    if (points.length < 2 || !(await this._ensureMap())) {
-      box.innerHTML = `<div class="pad dim">No route recorded for this trip.</div>`;
-      return;
-    }
-    const map = document.createElement("ha-map");
-    map.hass = this._hass;
-    map.autoFit = true;
-    map.fitZones = false;
-    map.paths = [
-      {
+    const paths = [];
+    if (points.length >= 2)
+      paths.push({
         color: "var(--primary-color)",
         gradualOpacity: 0,
         fullDatetime: false,
         name: `${this._time(trip.start_ts)} → ${this._time(trip.end_ts)}`,
         points: points.map((p) => ({ timestamp: new Date(p[0] * 1000), latitude: p[1], longitude: p[2] })),
-      },
-    ];
-    box.innerHTML = "";
-    box.appendChild(map);
-    this._map = map;
+      });
+    // While naming one end, outline what the chosen radius will cover.
+    if (this._naming?.kind === "trip" && this._naming.id === id) {
+      const lat = this._naming.end === "start" ? trip.start_lat : trip.end_lat;
+      const lon = this._naming.end === "start" ? trip.start_lon : trip.end_lon;
+      const r = Number(this.shadowRoot.getElementById("pradius")?.value || 100);
+      if (lat != null) paths.push(this._circle(lat, lon, r));
+    }
+    if (!paths.length) {
+      box.innerHTML = `<div class="pad dim">No route recorded for this trip.</div>`;
+      return;
+    }
+    await this._drawMap(paths);
   }
 }
 
@@ -457,6 +546,8 @@ MBLogbookCard.css = `
   .nameform button.primary { background: var(--primary-color); color: var(--text-primary-color, #fff); border-color: var(--primary-color); }
   .nameform .dim { flex-basis: 100%; }
   #mapbox { height: 320px; border-radius: 10px; overflow: hidden; }
+  #mapbox.small { height: 240px; }
+  td button.pmap { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--divider-color); background: none; color: var(--primary-text-color); font: inherit; cursor: pointer; }
   #mapbox ha-map { height: 100%; display: block; }
 `;
 
