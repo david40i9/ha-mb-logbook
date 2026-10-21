@@ -68,14 +68,47 @@ class MBLogbookCard extends HTMLElement {
     const end = Date.now() / 1000 + 86400;
     const start = Date.now() / 1000 - Number(this._days) * 86400;
     const args = { entry_id: this._car.entry_id, start, end };
-    const [trips, charges] = await Promise.all([
+    const [trips, charges, places] = await Promise.all([
       this._hass.callWS({ type: "mb_logbook/trips", ...args }),
       this._hass.callWS({ type: "mb_logbook/charges", ...args }),
+      this._hass.callWS({ type: "mb_logbook/places" }),
     ]);
     this._trips = trips;
     this._charges = charges;
+    this._places = places;
     this._open = null;
+    this._naming = null;
     this._render();
+  }
+
+  _placeRows() {
+    if (!this._places.length)
+      return `<tr><td colspan=4 class=empty>No named places yet. Click “unnamed · name it” on a trip or charge to add one.</td></tr>`;
+    const admin = this._hass.user?.is_admin;
+    const radii = [50, 100, 200, 500, 1000];
+    return this._places
+      .map((p) => {
+        const opts = [...new Set([...radii, Math.round(p.radius_m)])]
+          .sort((a, b) => a - b)
+          .map((r) => `<option value="${r}" ${r === Math.round(p.radius_m) ? "selected" : ""}>${r < 1000 ? r + " m" : r / 1000 + " km"}</option>`)
+          .join("");
+        return `<tr data-place="${p.id}">
+          <td>${admin ? `<input class=pn value="${esc(p.name)}" maxlength=60>` : esc(p.name)}</td>
+          <td>${admin ? `<select class=pr>${opts}</select>` : Math.round(p.radius_m) + " m"}</td>
+          <td class=n>${p.uses}</td>
+          <td class=n>${admin ? `<button class=psv>Save</button> <button class=pdel>Delete</button>` : ""}</td>
+        </tr>`;
+      })
+      .join("");
+  }
+
+  async _savePlace(body) {
+    try {
+      await this._hass.callWS({ type: "mb_logbook/place_save", ...body });
+      await this._load();
+    } catch (e) {
+      alert(`Couldn't save the place: ${e.message || e.code || e}`);
+    }
   }
 
   // ----- formatting -----------------------------------------------------------------
@@ -126,9 +159,29 @@ class MBLogbookCard extends HTMLElement {
     }
   }
 
-  _place(name, lat) {
+  _place(name, lat, kind, id, end) {
     if (name) return esc(name);
-    return lat == null ? "–" : "<span class=dim>unnamed</span>";
+    if (lat == null) return "–";
+    if (!this._hass.user?.is_admin) return "<span class=dim>unnamed</span>";
+    return `<button class=nameit data-kind="${kind}" data-id="${id}" data-end="${end || ""}">unnamed · name it</button>`;
+  }
+
+  _nameForm(lat, lon) {
+    const radii = [50, 100, 200, 500, 1000]
+      .map((r) => `<option value="${r}" ${r === 100 ? "selected" : ""}>${r < 1000 ? r + " m" : "1 km"}</option>`)
+      .join("");
+    const names = [...new Set((this._places || []).map((p) => p.name))]
+      .map((n) => `<option value="${esc(n)}"></option>`)
+      .join("");
+    return `<div class=nameform>
+        <span>Name this place</span>
+        <input id=pname list=pnames maxlength=60 placeholder="e.g. Mum's, Tesco Extra" autocomplete=off>
+        <datalist id=pnames>${names}</datalist>
+        <select id=pradius title="Anything within this distance gets the name">${radii}</select>
+        <button class=primary id=psave data-lat="${lat}" data-lon="${lon}">Save</button>
+        <button id=pcancel>Cancel</button>
+        <div class=dim>Applies to every trip and charge that starts or ends within the radius, past and future.</div>
+      </div>`;
   }
 
   // ----- summary ----------------------------------------------------------------------
@@ -181,16 +234,20 @@ class MBLogbookCard extends HTMLElement {
           else park = h;
         }
         const open = this._open === x.id;
+        const naming = this._naming && this._naming.kind === "trip" && this._naming.id === x.id ? this._naming : null;
+        const form = naming
+          ? this._nameForm(naming.end === "start" ? x.start_lat : x.end_lat, naming.end === "start" ? x.start_lon : x.end_lon)
+          : "";
         return `<tr class="trip ${open ? "open" : ""}" data-id="${x.id}">
             <td>${this._when(x.start_ts)}<div class=dim>${this._dur(x.end_ts - x.start_ts)}</div></td>
-            <td>${this._place(x.start_place, x.start_lat)} → ${this._place(x.end_place, x.end_lat)}</td>
+            <td>${this._place(x.start_place, x.start_lat, "trip", x.id, "start")} → ${this._place(x.end_place, x.end_lat, "trip", x.id, "end")}</td>
             <td class=n>${this._dist(x.distance_km)}</td>
             <td class=n>${used}</td>
             <td class=n>${kwh ? kwh.toFixed(1) + " kWh" : "–"}</td>
             <td class=n>${this._eff(x.distance_km, kwh)}</td>
             <td class=n>${park}</td>
             <td class=n>${x.point_count > 1 ? "🗺" : ""}</td>
-          </tr>${open ? `<tr class=maprow><td colspan=8><div id=mapbox></div></td></tr>` : ""}`;
+          </tr>${open ? `<tr class=maprow><td colspan=8>${form}<div id=mapbox></div></td></tr>` : ""}`;
       })
       .join("");
   }
@@ -201,15 +258,17 @@ class MBLogbookCard extends HTMLElement {
       .map((c) => {
         const kwh = c.kwh_meter ?? c.kwh_car;
         const src = c.kwh_meter != null ? "metered" : "from battery %";
+        const naming = this._naming && this._naming.kind === "charge" && this._naming.id === c.id;
+        const formRow = naming ? `<tr class=maprow><td colspan=7>${this._nameForm(c.lat, c.lon)}</td></tr>` : "";
         return `<tr>
           <td>${this._when(c.start_ts)}<div class=dim>${this._dur(c.end_ts - c.start_ts)}</div></td>
-          <td>${c.place ? esc(c.place) : "<span class=dim>unnamed</span>"}${c.at_home ? " <span class=chip>home</span>" : ""}</td>
+          <td>${this._place(c.place, c.lat, "charge", c.id)}${c.at_home ? " <span class=chip>home</span>" : ""}</td>
           <td class=n>${c.soc_start ?? "–"}→${c.soc_end ?? "–"}%</td>
           <td class=n>${kwh != null ? kwh.toFixed(1) + " kWh" : "–"}<div class=dim>${src}</div></td>
           <td class=n>${c.max_power_kw ? c.max_power_kw.toFixed(1) + " kW" : "–"}</td>
           <td class=n>${this._money(c.cost)}</td>
           <td class=n>${c.kwh_meter && c.cost ? this._money(c.cost / c.kwh_meter) : ""}</td>
-        </tr>`;
+        </tr>${formRow}`;
       })
       .join("");
   }
@@ -229,13 +288,16 @@ class MBLogbookCard extends HTMLElement {
             .join("")}</div>`
         : "";
     const periods = `<div class=seg>${PERIODS.map(([v, l]) => `<button data-days="${v}" class="${v === this._days ? "on" : ""}">${l}</button>`).join("")}</div>`;
-    const tabs = `<div class=seg>${[["trips", "Trips"], ["charges", "Charging"]]
+    const tabs = `<div class=seg>${[["trips", "Trips"], ["charges", "Charging"], ["places", "Places"]]
       .map(([v, l]) => `<button data-tab="${v}" class="${v === this._tab ? "on" : ""}">${l}</button>`)
       .join("")}</div>`;
     const table =
       this._tab === "trips"
         ? `<table><thead><tr><th>Start</th><th>Route</th><th class=n>Distance</th><th class=n>Battery</th><th class=n>Used</th><th class=n>Efficiency</th><th class=n>Parked before</th><th></th></tr></thead><tbody>${this._tripRows()}</tbody></table>`
-        : `<table><thead><tr><th>Start</th><th>Where</th><th class=n>Battery</th><th class=n>Energy</th><th class=n>Peak</th><th class=n>Cost</th><th class=n>Per kWh</th></tr></thead><tbody>${this._chargeRows()}</tbody></table>`;
+        : this._tab === "charges"
+          ? `<table><thead><tr><th>Start</th><th>Where</th><th class=n>Battery</th><th class=n>Energy</th><th class=n>Peak</th><th class=n>Cost</th><th class=n>Per kWh</th></tr></thead><tbody>${this._chargeRows()}</tbody></table>`
+          : `<table><thead><tr><th>Name</th><th>Radius</th><th class=n>Trip ends / charges</th><th></th></tr></thead><tbody>${this._placeRows()}</tbody></table>
+             <div class="dim pad">Named places are shared by all cars. Home Assistant zones take priority where they overlap.</div>`;
     root.innerHTML = `<style>${MBLogbookCard.css}</style>
       <ha-card>
         <div class=head><div class=title>${esc(this._config.title || this._car.name + " logbook")}${this._car.trip_active ? ' <span class="chip live">driving</span>' : ""}${this._car.charge_active ? ' <span class="chip live">charging</span>' : ""}</div>${cars}</div>
@@ -265,10 +327,55 @@ class MBLogbookCard extends HTMLElement {
       tr.addEventListener("click", () => {
         const id = Number(tr.dataset.id);
         this._open = this._open === id ? null : id;
+        this._naming = null;
         this._render();
         if (this._open != null) this._showMap(this._open);
       })
     );
+    root.querySelectorAll("button.nameit").forEach((b) =>
+      b.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        const id = Number(b.dataset.id);
+        this._naming = { kind: b.dataset.kind, id, end: b.dataset.end };
+        if (b.dataset.kind === "trip") this._open = id;
+        this._render();
+        if (b.dataset.kind === "trip") this._showMap(id);
+        root.getElementById("pname")?.focus();
+      })
+    );
+    const save = root.getElementById("psave");
+    if (save) {
+      const submit = () => {
+        const name = root.getElementById("pname").value.trim();
+        if (!name) return root.getElementById("pname").focus();
+        this._savePlace({
+          name,
+          lat: Number(save.dataset.lat),
+          lon: Number(save.dataset.lon),
+          radius_m: Number(root.getElementById("pradius").value),
+        });
+      };
+      save.addEventListener("click", submit);
+      root.getElementById("pname").addEventListener("keydown", (e) => e.key === "Enter" && submit());
+      root.getElementById("pcancel").addEventListener("click", () => {
+        this._naming = null;
+        this._render();
+        if (this._open != null) this._showMap(this._open);
+      });
+    }
+    root.querySelectorAll("tr[data-place]").forEach((tr) => {
+      const p = this._places.find((x) => x.id === Number(tr.dataset.place));
+      tr.querySelector(".psv")?.addEventListener("click", () => {
+        const name = tr.querySelector(".pn").value.trim();
+        if (!name) return;
+        this._savePlace({ place_id: p.id, name, lat: p.lat, lon: p.lon, radius_m: Number(tr.querySelector(".pr").value) });
+      });
+      tr.querySelector(".pdel")?.addEventListener("click", async () => {
+        if (!confirm(`Delete “${p.name}”? Trips there will show as unnamed again.`)) return;
+        await this._hass.callWS({ type: "mb_logbook/place_delete", place_id: p.id });
+        await this._load();
+      });
+    });
   }
 
   async _ensureMap() {
@@ -341,6 +448,14 @@ MBLogbookCard.css = `
   .empty { text-align: center; color: var(--secondary-text-color); padding: 18px; }
   .chip { font-size: .75em; padding: 1px 6px; border-radius: 8px; background: var(--secondary-background-color); color: var(--secondary-text-color); }
   .chip.live { background: var(--success-color, #43a047); color: #fff; }
+  button.nameit { background: none; border: 1px dashed var(--divider-color); border-radius: 8px; color: var(--secondary-text-color); font: inherit; font-size: .85em; padding: 1px 6px; cursor: pointer; }
+  button.nameit:hover { color: var(--primary-color); border-color: var(--primary-color); }
+  .nameform { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0 10px; }
+  .nameform input, td input.pn { flex: 1; min-width: 160px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); font: inherit; }
+  .nameform select, td select.pr { padding: 6px; border-radius: 8px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); font: inherit; }
+  .nameform button, td button.psv, td button.pdel { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--divider-color); background: none; color: var(--primary-text-color); font: inherit; cursor: pointer; }
+  .nameform button.primary { background: var(--primary-color); color: var(--text-primary-color, #fff); border-color: var(--primary-color); }
+  .nameform .dim { flex-basis: 100%; }
   #mapbox { height: 320px; border-radius: 10px; overflow: hidden; }
   #mapbox ha-map { height: 100%; display: block; }
 `;

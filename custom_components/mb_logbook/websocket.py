@@ -10,6 +10,7 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .const import (
     CONF_CAPACITY,
@@ -17,6 +18,7 @@ from .const import (
     CONF_CHARGER_ENERGY,
     CONF_DISTANCE_UNIT,
     DOMAIN,
+    SIGNAL_UPDATED,
     UNIT_KM,
     entry_conf,
 )
@@ -44,6 +46,65 @@ def async_register_websocket(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_trip_points)
     websocket_api.async_register_command(hass, ws_charges)
     websocket_api.async_register_command(hass, ws_delete_trip)
+    websocket_api.async_register_command(hass, ws_places)
+    websocket_api.async_register_command(hass, ws_place_save)
+    websocket_api.async_register_command(hass, ws_place_delete)
+
+
+@callback
+def _refresh_all(hass: HomeAssistant) -> None:
+    """Place names feed the last-trip/last-charge attributes of every car."""
+    for entry in _entries(hass).values():
+        async_dispatcher_send(hass, SIGNAL_UPDATED.format(entry.runtime_data.car_id))
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/places"})
+@websocket_api.async_response
+async def ws_places(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
+    db = hass.data[DOMAIN]["db"]
+    places = await hass.async_add_executor_job(db.places)
+    usage = await hass.async_add_executor_job(db.place_usage)
+    for p in places:
+        p["uses"] = usage.get(p["id"], 0)
+    connection.send_result(msg["id"], places)
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/place_save",
+        vol.Optional("place_id"): int,
+        vol.Required("name"): vol.All(str, vol.Strip, vol.Length(min=1, max=60)),
+        vol.Required("lat"): vol.All(vol.Coerce(float), vol.Range(min=-90, max=90)),
+        vol.Required("lon"): vol.All(vol.Coerce(float), vol.Range(min=-180, max=180)),
+        vol.Required("radius_m"): vol.All(vol.Coerce(float), vol.Range(min=20, max=5000)),
+    }
+)
+@websocket_api.async_response
+async def ws_place_save(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
+    db = hass.data[DOMAIN]["db"]
+    place = {
+        "id": msg.get("place_id"),
+        "name": msg["name"],
+        "lat": msg["lat"],
+        "lon": msg["lon"],
+        "radius_m": msg["radius_m"],
+    }
+    place_id = await hass.async_add_executor_job(db.save_place, place)
+    _refresh_all(hass)
+    connection.send_result(msg["id"], {"id": place_id})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/place_delete", vol.Required("place_id"): int}
+)
+@websocket_api.async_response
+async def ws_place_delete(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
+    db = hass.data[DOMAIN]["db"]
+    await hass.async_add_executor_job(db.delete_place, msg["place_id"])
+    _refresh_all(hass)
+    connection.send_result(msg["id"], {"deleted": msg["place_id"]})
 
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/cars"})

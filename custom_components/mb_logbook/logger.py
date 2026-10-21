@@ -419,6 +419,8 @@ class CarLogger:
             "start_ts": time.time(),
             "soc_start": self._soc(),
             "place": place,
+            "lat": pos[0] if pos else None,
+            "lon": pos[1] if pos else None,
             "at_home": self._at_home(),
             "kwh_meter": 0.0,
             "cost": 0.0,
@@ -473,6 +475,8 @@ class CarLogger:
             "max_power_kw": charge.get("max_power_kw") or None,
             "place": charge.get("place"),
             "at_home": charge.get("at_home"),
+            "lat": charge.get("lat"),
+            "lon": charge.get("lon"),
         }
         await self.hass.async_add_executor_job(self.db.add_charge, record)
         park = self._state.setdefault("park", self._park_snapshot())

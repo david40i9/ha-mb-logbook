@@ -5,11 +5,12 @@ A Home Assistant integration that keeps a permanent logbook for Mercedes-Benz el
 - **Trips**: start and end time, distance, battery used, kWh and efficiency, start and end place, and the route.
 - **Parked drain**: how much battery each car lost while parked between trips (parks that included a charge are marked, not counted).
 - **Charging sessions**: battery % added, kWh, and, with a home charger energy meter and an electricity price sensor, the metered energy and cost of each home charge credited to the car that was charging.
+- **Named places**: a start or end outside your Home Assistant zones shows as unnamed; name it from the card (with a radius) and every past and future trip or charge there takes that name. Places are shared by all cars and managed in the card's Places tab.
 - **Several cars**: add each car separately; the card switches between them.
 
 It reads the entities of the [mbapi2020](https://github.com/ReneNulschDE/mbapi2020) integration (any car that exposes an odometer, battery %, ignition state and GPS tracker works). It does not talk to Mercedes itself.
 
-**Privacy:** everything stays in Home Assistant. Places are named from your own Home Assistant zones; there is no address lookup service. The route map is Home Assistant's built-in map component, which loads the same map tiles as the standard map card.
+**Privacy:** everything stays in Home Assistant. Places are named from your own Home Assistant zones and your own named places; there is no address lookup service. The route map is Home Assistant's built-in map component, which loads the same map tiles as the standard map card.
 
 ## Status
 
@@ -35,7 +36,7 @@ days: 30          # 7, 30, 90 or 365
 # car: EQS        # optional: lock the card to one car (by name)
 ```
 
-Click a trip to show its route.
+Click a trip to show its route. Click **unnamed · name it** next to a start or end to name that place (admins only).
 
 ## Sensors (per car)
 
