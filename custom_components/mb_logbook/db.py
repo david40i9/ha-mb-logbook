@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS trips (
     start_place TEXT,
     end_place TEXT,
     park_hours REAL,
+    park_drain_hours REAL,
     park_soc_drop REAL,
     park_charged INTEGER,
     points TEXT
@@ -65,6 +66,7 @@ CREATE TABLE IF NOT EXISTS places (
 
 # Columns added after 0.1.0: (table, column, type)
 MIGRATIONS = (
+    ("trips", "park_drain_hours", "REAL"),
     ("charges", "lat", "REAL"),
     ("charges", "lon", "REAL"),
 )
@@ -73,7 +75,7 @@ TRIP_COLS = (
     "car", "start_ts", "end_ts", "odo_start_km", "odo_end_km", "distance_km",
     "soc_start", "soc_end", "range_start_km", "range_end_km",
     "start_lat", "start_lon", "end_lat", "end_lon", "start_place", "end_place",
-    "park_hours", "park_soc_drop", "park_charged", "points",
+    "park_hours", "park_drain_hours", "park_soc_drop", "park_charged", "points",
 )
 CHARGE_COLS = (
     "car", "start_ts", "end_ts", "soc_start", "soc_end", "kwh_car", "kwh_meter",
@@ -333,9 +335,13 @@ class LogbookDB:
 
     def idle_parks(self, car: str, since_ts: float, min_hours: float) -> list[tuple]:
         """(hours, soc_drop) for uncharged parks that ended after since_ts."""
+        # Drain is measured after any charge (park_drain_hours); rows from before
+        # that column existed only count when the park had no charge.
         rows = self._exec(
-            "SELECT park_hours, park_soc_drop FROM trips WHERE car = ? AND start_ts >= ? "
-            "AND park_charged = 0 AND park_hours >= ? AND park_soc_drop IS NOT NULL",
+            "SELECT COALESCE(park_drain_hours, park_hours) AS h, park_soc_drop FROM trips "
+            "WHERE car = ? AND start_ts >= ? AND park_soc_drop IS NOT NULL "
+            "AND (park_drain_hours IS NOT NULL OR park_charged = 0) "
+            "AND COALESCE(park_drain_hours, park_hours) >= ?",
             (car, since_ts, min_hours),
         )
-        return [(r["park_hours"], r["park_soc_drop"]) for r in rows]
+        return [(r["h"], r["park_soc_drop"]) for r in rows]

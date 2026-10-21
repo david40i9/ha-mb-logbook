@@ -337,8 +337,9 @@ class MBLogbookCard extends HTMLElement {
     }
     // Battery % only comes in whole steps, so pool the parks (total lost over
     // total time) rather than averaging per-park rates that are mostly 0.
-    const parks = t.filter((x) => !x.park_charged && x.park_hours >= 6 && x.park_soc_drop != null);
-    const hours = parks.reduce((s, x) => s + x.park_hours, 0);
+    const dh = (x) => x.park_drain_hours ?? (x.park_charged ? null : x.park_hours);
+    const parks = t.filter((x) => x.park_soc_drop != null && dh(x) >= 6);
+    const hours = parks.reduce((s, x) => s + dh(x), 0);
     const drain = hours ? (parks.reduce((s, x) => s + x.park_soc_drop, 0) / hours) * 24 : null;
     return [
       ["Trips", t.length],
@@ -360,9 +361,10 @@ class MBLogbookCard extends HTMLElement {
         let park = "–";
         if (x.park_hours != null) {
           const h = x.park_hours >= 48 ? `${(x.park_hours / 24).toFixed(1)} d` : `${x.park_hours.toFixed(1)} h`;
-          if (x.park_charged) park = `${h} <span class=chip>charged</span>`;
-          else if (x.park_soc_drop != null) park = `${h} · −${x.park_soc_drop}%`;
-          else park = h;
+          // Drain is measured after any charge, so a charged park can still show it.
+          const d = x.park_soc_drop;
+          const drain = d == null ? "" : d > 0 ? ` · −${d}%` : d < 0 ? ` · +${-d}%` : " · 0%";
+          park = `${h}${x.park_charged ? " <span class=chip>charged</span>" : ""}${drain}`;
         }
         const open = this._open === x.id;
         const naming = this._naming && this._naming.kind === "trip" && this._naming.id === x.id ? this._naming : null;
@@ -629,7 +631,7 @@ MBLogbookCard.css = `
   #mapbox ha-map { height: 100%; display: block; }
 `;
 
-const CARD_VERSION = "0.4.1";
+const CARD_VERSION = "0.5.0";
 
 if (!customElements.get("mb-logbook-card")) {
   customElements.define("mb-logbook-card", MBLogbookCard);

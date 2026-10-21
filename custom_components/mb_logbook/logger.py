@@ -55,6 +55,7 @@ from .const import (
     STORAGE_VERSION,
     UNKNOWN_STATES,
 )
+from . import rules
 from .db import LogbookDB
 
 _LOGGER = logging.getLogger(__name__)
@@ -121,8 +122,9 @@ class CarLogger:
         live = self._state.get("park") or {}
         nothing_live = live.get("ts") is None or live.get("ts", 0) <= cutoff_ts + 600
         if park.get("ts") and nothing_live and not self._state.get("trip"):
-            charged = park.get("charged") or bool(live.get("charged"))
-            self._state["park"] = {"ts": park["ts"], "soc": park["soc"], "charged": charged}
+            adopted = dict(park)
+            adopted["charged"] = bool(park.get("charged")) or bool(live.get("charged"))
+            self._state["park"] = adopted
         self._save()
         self._notify()
 
@@ -249,7 +251,7 @@ class CarLogger:
         return zone_id == self.conf.get(CONF_HOME_ZONE, DEFAULT_HOME_ZONE)
 
     def _park_snapshot(self) -> dict[str, Any]:
-        return {"ts": time.time(), "soc": self._soc(), "charged": False}
+        return rules.new_park(time.time(), self._soc(), False)
 
     # ----- trips ----------------------------------------------------------------------
 
@@ -317,11 +319,8 @@ class CarLogger:
         pos = self._position()
         lat, lon = (pos[0], pos[1]) if pos else (None, None)
         place, _ = self._place(lat, lon)
-        park = self._state.get("park") or {}
         now = time.time()
         soc = self._soc()
-        park_soc = park.get("soc")
-        drop = round(park_soc - soc, 1) if park_soc is not None and soc is not None else None
         self._state["trip"] = {
             "start_ts": now,
             "odo_start_km": self._odo_km(),
@@ -334,10 +333,7 @@ class CarLogger:
             "start_place": place,
             "points": [[round(now), lat, lon]] if pos else [],
             "last_fix": pos[2] if pos else None,
-            "park_hours": round((now - park["ts"]) / 3600, 2) if park.get("ts") else None,
-            "park_soc_drop": drop,
-            # Battery up by 2% or more while parked can only be a charge.
-            "park_charged": bool(park.get("charged")) or (drop is not None and drop <= -2),
+            **rules.park_fields(self._state.get("park"), now, soc),
         }
         self._save()
         self._notify()
@@ -388,7 +384,7 @@ class CarLogger:
         points = trip.get("points") or []
         if pos and (not points or points[-1][1:] != [lat, lon]):
             points.append([round(trip.get("off_ts") or time.time()), lat, lon])
-        soc_end = self._soc()
+        soc_end = rules.trip_soc_end(self._soc(), self._state.get("charge"), trip.get("off_ts"))
         record = {
             "car": self.car_id,
             "start_ts": trip["start_ts"],
@@ -407,17 +403,16 @@ class CarLogger:
             "start_place": trip.get("start_place"),
             "end_place": place,
             "park_hours": trip.get("park_hours"),
+            "park_drain_hours": trip.get("park_drain_hours"),
             "park_soc_drop": trip.get("park_soc_drop"),
             "park_charged": trip.get("park_charged"),
             "points": points,
         }
         await self.hass.async_add_executor_job(self.db.add_trip, record)
         # A charge that started before the trip was closed belongs to this park.
-        self._state["park"] = {
-            "ts": record["end_ts"],
-            "soc": soc_end,
-            "charged": self._state.get("charge") is not None,
-        }
+        self._state["park"] = rules.new_park(
+            record["end_ts"], soc_end, self._state.get("charge") is not None
+        )
         self._save()
         self._notify()
 
@@ -504,10 +499,8 @@ class CarLogger:
             "lon": charge.get("lon"),
         }
         await self.hass.async_add_executor_job(self.db.add_charge, record)
-        park = self._state.setdefault("park", self._park_snapshot())
-        park["soc"] = soc_end  # drain is measured from the end of the charge
-        park["ts"] = record["end_ts"]
-        park["charged"] = False
+        # Same park, now charged; drain is measured from the end of the charge.
+        self._state["park"] = rules.after_charge(self._state.get("park"), record["end_ts"], soc_end)
         self._save()
         self._notify()
 

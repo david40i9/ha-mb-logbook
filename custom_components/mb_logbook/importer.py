@@ -39,6 +39,7 @@ from .const import (
     MAX_METER_STEP_KWH,
     UNKNOWN_STATES,
 )
+from . import rules
 from .logger import CarLogger, _num, _to_km
 
 _LOGGER = logging.getLogger(__name__)
@@ -99,8 +100,6 @@ class _Replay:
         pos = self._pos()
         lat, lon = (pos[0], pos[1]) if pos else (None, None)
         soc = self._val(CONF_SOC)
-        p = self.park
-        drop = round(p["soc"] - soc, 1) if p["soc"] is not None and soc is not None else None
         self.trip = {
             "start_ts": ts,
             "odo_start_km": self._km(CONF_ODOMETER),
@@ -113,10 +112,7 @@ class _Replay:
             "start_place": self._place(lat, lon)[0],
             "points": [[round(ts), lat, lon]] if pos else [],
             "last_fix": pos[2] if pos else None,
-            "park_hours": round((ts - p["ts"]) / 3600, 2) if p["ts"] else None,
-            "park_soc_drop": drop,
-            # Battery up by 2% or more while parked can only be a charge.
-            "park_charged": bool(p["charged"]) or (drop is not None and drop <= -2),
+            **rules.park_fields(self.park, ts, soc),
         }
 
     def end_trip(self) -> None:
@@ -140,7 +136,7 @@ class _Replay:
         pts = t["points"]
         if pos and (not pts or pts[-1][1:] != [lat, lon]):
             pts.append([round(t["off_ts"]), lat, lon])
-        soc_end = self._val(CONF_SOC)
+        soc_end = rules.trip_soc_end(self._val(CONF_SOC), self.charge, t["off_ts"])
         self.trips.append(
             {
                 "car": self.lg.car_id,
@@ -160,13 +156,14 @@ class _Replay:
                 "start_place": t["start_place"],
                 "end_place": self._place(lat, lon)[0],
                 "park_hours": t["park_hours"],
+                "park_drain_hours": t["park_drain_hours"],
                 "park_soc_drop": t["park_soc_drop"],
                 "park_charged": t["park_charged"],
                 "points": pts,
             }
         )
         # A charge that started before the trip was closed belongs to this park.
-        self.park = {"ts": t["off_ts"], "soc": soc_end, "charged": self.charge is not None}
+        self.park = rules.new_park(t["off_ts"], soc_end, self.charge is not None)
 
     # ----- charges -----
     def start_charge(self, ts: float) -> None:
@@ -217,7 +214,8 @@ class _Replay:
                 "lon": c["lon"],
             }
         )
-        self.park = {"ts": c["last_ts"], "soc": soc_end, "charged": False}
+        # Same park, now charged; drain is measured from the end of the charge.
+        self.park = rules.after_charge(self.park, c["last_ts"], soc_end)
 
     # ----- driver -----
     def feed(self, ts: float, eid: str, st: State) -> None:
