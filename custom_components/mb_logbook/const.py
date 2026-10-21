@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 DOMAIN = "mb_logbook"
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 
 DB_FILENAME = "mb_logbook.db"
 STORAGE_VERSION = 1

@@ -569,7 +569,8 @@ class MBLogbookCard extends HTMLElement {
         gradualOpacity: 0,
         fullDatetime: false,
         name: `${this._time(trip.start_ts)} → ${this._time(trip.end_ts)}`,
-        points: points.map((p) => ({ timestamp: new Date(p[0] * 1000), latitude: p[1], longitude: p[2] })),
+        // HA 2026.x reads `point: [lat, lon]`; latitude/longitude kept for older versions.
+        points: points.map((p) => ({ timestamp: new Date(p[0] * 1000), point: [p[1], p[2]], latitude: p[1], longitude: p[2] })),
       });
     // While naming one end, show it as an editable place and zoom to it.
     let edit = false;
@@ -628,7 +629,7 @@ MBLogbookCard.css = `
   #mapbox ha-map { height: 100%; display: block; }
 `;
 
-const CARD_VERSION = "0.4.0";
+const CARD_VERSION = "0.4.1";
 
 if (!customElements.get("mb-logbook-card")) {
   customElements.define("mb-logbook-card", MBLogbookCard);
