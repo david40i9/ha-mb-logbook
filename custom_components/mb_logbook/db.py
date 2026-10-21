@@ -268,6 +268,43 @@ class LogbookDB:
         rows = self.charges(car, 0, 1e12, limit=1)
         return rows[0] if rows else None
 
+    def replace_before(
+        self, car: str, cutoff_ts: float, trips: list[dict[str, Any]], charges: list[dict[str, Any]]
+    ) -> None:
+        """Swap in imported history: drop this car's rows before the cut-off, insert new ones."""
+        trip_rows = []
+        for t in trips:
+            row = dict(t)
+            row["points"] = json.dumps(row.get("points") or [])
+            row["park_charged"] = 1 if row.get("park_charged") else 0
+            trip_rows.append(tuple(row.get(c) for c in TRIP_COLS))
+        charge_rows = []
+        for c in charges:
+            row = dict(c)
+            row["at_home"] = 1 if row.get("at_home") else 0
+            charge_rows.append(tuple(row.get(col) for col in CHARGE_COLS))
+        with self._lock:
+            assert self._conn is not None
+            with self._conn:  # one transaction
+                self._conn.execute("DELETE FROM trips WHERE car = ? AND start_ts < ?", (car, cutoff_ts))
+                self._conn.execute("DELETE FROM charges WHERE car = ? AND start_ts < ?", (car, cutoff_ts))
+                self._conn.executemany(
+                    f"INSERT INTO trips ({', '.join(TRIP_COLS)}) VALUES ({', '.join('?' for _ in TRIP_COLS)})",
+                    trip_rows,
+                )
+                self._conn.executemany(
+                    f"INSERT INTO charges ({', '.join(CHARGE_COLS)}) VALUES ({', '.join('?' for _ in CHARGE_COLS)})",
+                    charge_rows,
+                )
+
+    def first_ts(self, car: str) -> float | None:
+        rows = self._exec(
+            "SELECT MIN(start_ts) AS t FROM (SELECT start_ts FROM trips WHERE car = ? "
+            "UNION ALL SELECT start_ts FROM charges WHERE car = ?)",
+            (car, car),
+        )
+        return rows[0]["t"] if rows else None
+
     # ----- totals ------------------------------------------------------------------------
 
     def totals(self, car: str, start_ts: float, end_ts: float) -> dict[str, Any]:

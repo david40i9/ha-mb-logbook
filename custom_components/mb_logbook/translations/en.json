@@ -79,5 +79,15 @@
       "trip_active": { "name": "Trip in progress" },
       "charge_active": { "name": "Charging session" }
     }
+  },
+  "services": {
+    "import_history": {
+      "name": "Import history",
+      "description": "Rebuilds trips and charges from Home Assistant's recorded history for the time before the car was added. Re-running replaces earlier imports; live-logged trips are never touched.",
+      "fields": {
+        "config_entry_id": { "name": "Car", "description": "Only this car (default: all cars)." },
+        "days": { "name": "Days", "description": "How far back to look (limited by how long the recorder keeps history)." }
+      }
+    }
   }
 }

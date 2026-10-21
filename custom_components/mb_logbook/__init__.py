@@ -16,12 +16,19 @@ from homeassistant.components.lovelace.const import LOVELACE_DATA
 from homeassistant.components.lovelace.resources import ResourceStorageCollection
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.start import async_at_started
+from homeassistant.helpers.typing import ConfigType
+import voluptuous as vol
 
 from .const import DB_FILENAME, DOMAIN, VERSION, entry_conf
 from .db import LogbookDB
+from .importer import async_import_history
 from .logger import CarLogger
 from .websocket import async_register_websocket
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -76,12 +83,57 @@ def car_id_for(entry: ConfigEntry) -> str:
     return entry.unique_id or entry.entry_id
 
 
+async def _async_import(hass: HomeAssistant, entry: LogbookConfigEntry, days: int) -> dict:
+    """Import history up to when this car was added.
+
+    Everything the live logger writes starts after the entry was created, so
+    the creation time cleanly splits imported rows from live ones.
+    """
+    return await async_import_history(hass, entry.runtime_data, entry.created_at, days)
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    async def _service(call: ServiceCall) -> ServiceResponse:
+        days = call.data.get("days", 365)
+        wanted = call.data.get("config_entry_id")
+        results = {}
+        for entry in hass.config_entries.async_loaded_entries(DOMAIN):
+            if wanted and entry.entry_id != wanted:
+                continue
+            results[entry.title] = await _async_import(hass, entry, days)
+        return results
+
+    hass.services.async_register(
+        DOMAIN,
+        "import_history",
+        _service,
+        schema=vol.Schema(
+            {
+                vol.Optional("config_entry_id"): cv.string,
+                vol.Optional("days", default=365): vol.All(vol.Coerce(int), vol.Range(min=1, max=3650)),
+            }
+        ),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: LogbookConfigEntry) -> bool:
     db = await _async_setup_shared(hass)
     logger = CarLogger(hass, car_id_for(entry), entry_conf(entry), db)
     await logger.async_start()
     entry.runtime_data = logger
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    if not logger.imported:
+        # First run for this car: fill in everything the recorder still has.
+        async def _first_import(_hass: HomeAssistant) -> None:
+            try:
+                await _async_import(hass, entry, 365)
+            except Exception:  # noqa: BLE001 - an import problem must not stop logging
+                _LOGGER.exception("History import failed for %s", entry.title)
+
+        entry.async_on_unload(async_at_started(hass, _first_import))
     return True
 
 

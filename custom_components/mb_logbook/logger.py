@@ -106,6 +106,26 @@ class CarLogger:
     def current_trip(self) -> dict[str, Any] | None:
         return self._state.get("trip")
 
+    @property
+    def imported(self) -> bool:
+        return bool(self._state.get("imported"))
+
+    @callback
+    def adopt_imported_park(self, park: dict[str, Any], cutoff_ts: float) -> None:
+        """After an import, measure the next park from the last imported trip.
+
+        Only while nothing has happened live since set-up; otherwise the live
+        park is newer and already right.
+        """
+        self._state["imported"] = True
+        live = self._state.get("park") or {}
+        nothing_live = live.get("ts") is None or live.get("ts", 0) <= cutoff_ts + 600
+        if park.get("ts") and nothing_live and not self._state.get("trip"):
+            charged = park.get("charged") or bool(live.get("charged"))
+            self._state["park"] = {"ts": park["ts"], "soc": park["soc"], "charged": charged}
+        self._save()
+        self._notify()
+
     # ----- lifecycle ----------------------------------------------------------------
 
     async def async_start(self) -> None:

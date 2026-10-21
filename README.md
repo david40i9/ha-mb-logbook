@@ -26,6 +26,10 @@ Copy `custom_components/mb_logbook` into your `config/custom_components` folder 
 2. Enter the usable battery capacity in kWh (used to turn battery % into kWh).
 3. Optional: a home charger energy meter (a total kWh sensor) and an electricity price sensor (per kWh). While a car is charging in the home zone, the meter's increase and its cost at the live price are credited to that car's session.
 
+## Existing history
+
+When a car is added, MB Logbook rebuilds its earlier trips and charges from Home Assistant's recorded history (as far back as your recorder keeps it), using the same rules as live logging. Run the **MB Logbook: Import history** action to do it again; it only replaces previously imported rows, never live ones.
+
 ## Card
 
 Registered automatically as a dashboard resource (and updated on each version); nothing to add by hand.
