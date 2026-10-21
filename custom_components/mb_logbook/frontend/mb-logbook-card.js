@@ -551,8 +551,11 @@ MBLogbookCard.css = `
   #mapbox ha-map { height: 100%; display: block; }
 `;
 
+const CARD_VERSION = "0.2.3";
+
 if (!customElements.get("mb-logbook-card")) {
   customElements.define("mb-logbook-card", MBLogbookCard);
+  console.info(`%c MB-LOGBOOK-CARD %c ${CARD_VERSION} `, "background:#89b4fa;color:#1e1e2e;font-weight:600", "background:#313244;color:#cdd6f4");
   window.customCards = window.customCards || [];
   window.customCards.push({
     type: "mb-logbook-card",
