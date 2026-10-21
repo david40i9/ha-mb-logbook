@@ -23,8 +23,21 @@ def new_park(ts: float, soc: float | None, charging: bool) -> dict[str, Any]:
     return {"ts": ts, "drain_ts": ts, "soc": soc, "charged": charging}
 
 
+def charging_into_park(charge: dict[str, Any] | None, off_ts: float | None) -> bool:
+    """Did this charge start after the trip ended (plugged in on arrival)?
+
+    A session that started earlier is left over from before the drive (it is
+    only closed after a gap), so it doesn't belong to the new park.
+    """
+    if not charge:
+        return False
+    return off_ts is None or charge.get("start_ts", 0) >= off_ts - 120
+
+
 def after_charge(park: dict[str, Any] | None, ts: float, soc: float | None) -> dict[str, Any]:
     """A charge ended: keep the park, restart the drain baseline from here."""
+    if park and park.get("ts") and ts < park["ts"]:
+        return park  # it finished before this park began: it belonged to the last one
     park = dict(park or new_park(ts, soc, True))
     park["charged"] = True
     park["drain_ts"] = ts
@@ -60,7 +73,6 @@ def trip_soc_end(
     If charging began before the trip was closed, the current reading already
     includes charge; the level when charging began is the trip's end level.
     """
-    if charge and charge.get("soc_start") is not None:
-        if off_ts is None or charge.get("start_ts", 0) >= off_ts - 120:
-            return charge["soc_start"]
+    if charging_into_park(charge, off_ts) and charge.get("soc_start") is not None:
+        return charge["soc_start"]
     return soc_now

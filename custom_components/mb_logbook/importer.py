@@ -163,7 +163,9 @@ class _Replay:
             }
         )
         # A charge that started before the trip was closed belongs to this park.
-        self.park = rules.new_park(t["off_ts"], soc_end, self.charge is not None)
+        self.park = rules.new_park(
+            t["off_ts"], soc_end, rules.charging_into_park(self.charge, t["off_ts"])
+        )
 
     # ----- charges -----
     def start_charge(self, ts: float) -> None:
@@ -201,7 +203,7 @@ class _Replay:
             {
                 "car": self.lg.car_id,
                 "start_ts": c["start_ts"],
-                "end_ts": c["last_ts"],
+                "end_ts": c.get("off_ts", c["last_ts"]),  # when charging really stopped
                 "soc_start": c["soc_start"],
                 "soc_end": soc_end,
                 "kwh_car": kwh_car,
@@ -215,7 +217,7 @@ class _Replay:
             }
         )
         # Same park, now charged; drain is measured from the end of the charge.
-        self.park = rules.after_charge(self.park, c["last_ts"], soc_end)
+        self.park = rules.after_charge(self.park, c.get("off_ts", c["last_ts"]), soc_end)
 
     # ----- driver -----
     def feed(self, ts: float, eid: str, st: State) -> None:

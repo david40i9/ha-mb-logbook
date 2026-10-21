@@ -411,7 +411,9 @@ class CarLogger:
         await self.hass.async_add_executor_job(self.db.add_trip, record)
         # A charge that started before the trip was closed belongs to this park.
         self._state["park"] = rules.new_park(
-            record["end_ts"], soc_end, self._state.get("charge") is not None
+            record["end_ts"],
+            soc_end,
+            rules.charging_into_park(self._state.get("charge"), trip.get("off_ts")),
         )
         self._save()
         self._notify()
@@ -422,13 +424,18 @@ class CarLogger:
     def _on_charging(self, new: State | None) -> None:
         if new is None or new.state in UNKNOWN_STATES:
             return
+        charge = self._state.get("charge")
         if new.state == "on":
             if self._charge_end_timer:
                 self._charge_end_timer()
                 self._charge_end_timer = None
-            if not self._state.get("charge"):
+            if not charge:
                 self._start_charge()
-        elif self._state.get("charge"):
+            else:
+                charge.pop("off_ts", None)
+        elif charge:
+            charge.setdefault("off_ts", time.time())  # when it really stopped
+            self._save()
             self._schedule_charge_end(CHARGE_GAP_MINUTES * 60)
 
     @callback
@@ -486,7 +493,7 @@ class CarLogger:
         record = {
             "car": self.car_id,
             "start_ts": charge["start_ts"],
-            "end_ts": charge.get("last_ts") or time.time(),
+            "end_ts": charge.get("off_ts") or charge.get("last_ts") or time.time(),
             "soc_start": soc_start,
             "soc_end": soc_end,
             "kwh_car": kwh_car,
