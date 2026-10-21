@@ -28,7 +28,7 @@ Copy `custom_components/mb_logbook` into your `config/custom_components` folder 
 
 ## Card
 
-Added automatically; no resource needed.
+Registered automatically as a dashboard resource (and updated on each version); nothing to add by hand.
 
 ```yaml
 type: custom:mb-logbook-card

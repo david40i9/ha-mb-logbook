@@ -7,10 +7,13 @@ log. Nothing is sent outside Home Assistant.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
+from homeassistant.components.lovelace.const import LOVELACE_DATA
+from homeassistant.components.lovelace.resources import ResourceStorageCollection
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
@@ -19,6 +22,8 @@ from .const import DB_FILENAME, DOMAIN, VERSION, entry_conf
 from .db import LogbookDB
 from .logger import CarLogger
 from .websocket import async_register_websocket
+
+_LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR]
 CARD_URL = "/mb_logbook/mb-logbook-card.js"
@@ -38,8 +43,33 @@ async def _async_setup_shared(hass: HomeAssistant) -> LogbookDB:
     await hass.http.async_register_static_paths(
         [StaticPathConfig(CARD_URL, str(card), True)]
     )
-    add_extra_js_url(hass, f"{CARD_URL}?v={VERSION}")
+    await _async_register_card(hass)
     return db
+
+
+async def _async_register_card(hass: HomeAssistant) -> None:
+    """Keep a dashboard resource for the card, versioned so browsers refetch it.
+
+    A Lovelace resource loads in every browser on every dashboard visit; the
+    frontend's extra-JS list is baked into a cached index page, which some
+    browsers (Firefox) kept serving without the card.
+    """
+    url = f"{CARD_URL}?v={VERSION}"
+    try:
+        resources = hass.data[LOVELACE_DATA].resources
+        if not isinstance(resources, ResourceStorageCollection):
+            add_extra_js_url(hass, url)  # YAML-mode dashboards: can't edit resources
+            return
+        await resources.async_get_info()  # loads the collection on first use
+        for item in resources.async_items():
+            if item["url"].split("?")[0] == CARD_URL:
+                if item["url"] != url:
+                    await resources.async_update_item(item["id"], {"res_type": "module", "url": url})
+                return
+        await resources.async_create_item({"res_type": "module", "url": url})
+    except Exception:  # noqa: BLE001 - never block setup over the card
+        _LOGGER.warning("Couldn't register the card as a dashboard resource; using extra JS")
+        add_extra_js_url(hass, url)
 
 
 def car_id_for(entry: ConfigEntry) -> str:
