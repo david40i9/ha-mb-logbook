@@ -11,6 +11,7 @@ from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_CAPACITY,
@@ -18,6 +19,7 @@ from .const import (
     CONF_CHARGER_ENERGY,
     CONF_DISTANCE_UNIT,
     DOMAIN,
+    IDLE_MIN_HOURS,
     SIGNAL_UPDATED,
     UNIT_KM,
     entry_conf,
@@ -46,6 +48,8 @@ def async_register_websocket(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_trip_points)
     websocket_api.async_register_command(hass, ws_charges)
     websocket_api.async_register_command(hass, ws_delete_trip)
+    websocket_api.async_register_command(hass, ws_stats)
+    websocket_api.async_register_command(hass, ws_routes)
     websocket_api.async_register_command(hass, ws_places)
     websocket_api.async_register_command(hass, ws_place_save)
     websocket_api.async_register_command(hass, ws_place_delete)
@@ -56,6 +60,98 @@ def _refresh_all(hass: HomeAssistant) -> None:
     """Place names feed the last-trip/last-charge attributes of every car."""
     for entry in _entries(hass).values():
         async_dispatcher_send(hass, SIGNAL_UPDATED.format(entry.runtime_data.car_id))
+
+
+def _month_key(ts: float) -> str:
+    return dt_util.as_local(dt_util.utc_from_timestamp(ts)).strftime("%Y-%m")
+
+
+def _month_start(months_back: int) -> float:
+    """Local midnight on the 1st, ``months_back`` months before this month."""
+    now = dt_util.now()
+    y, m = now.year, now.month - months_back
+    while m <= 0:
+        m += 12
+        y -= 1
+    return now.replace(year=y, month=m, day=1, hour=0, minute=0, second=0, microsecond=0).timestamp()
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/stats",
+        vol.Required("entry_id"): str,
+        vol.Optional("months", default=12): vol.All(int, vol.Range(min=1, max=60)),
+    }
+)
+@websocket_api.async_response
+async def ws_stats(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
+    """Per-month totals and most-visited places for the overview page."""
+    entry = _car(hass, msg["entry_id"])
+    logger = entry.runtime_data
+    cap = float(entry_conf(entry).get(CONF_CAPACITY) or 0)
+    start = _month_start(msg["months"] - 1)
+    end = time.time() + 86400
+    trips = await hass.async_add_executor_job(logger.db.trips, logger.car_id, start, end, 100000)
+    charges = await hass.async_add_executor_job(logger.db.charges, logger.car_id, start, end, 100000)
+
+    months: dict[str, dict[str, float]] = {}
+    for i in range(msg["months"] - 1, -1, -1):
+        months[_month_key(_month_start(i))] = {
+            "trips": 0, "distance_km": 0.0, "kwh_used": 0.0, "km_with_kwh": 0.0,
+            "charges": 0, "charged_kwh": 0.0, "cost": 0.0,
+            "idle_hours": 0.0, "idle_drop": 0.0,
+        }
+    places: dict[str, int] = {}
+    for t in trips:
+        mo = months.get(_month_key(t["start_ts"]))
+        if mo is None:
+            continue
+        mo["trips"] += 1
+        mo["distance_km"] += t["distance_km"]
+        if cap and t["soc_start"] is not None and t["soc_end"] is not None and t["soc_start"] > t["soc_end"]:
+            mo["kwh_used"] += (t["soc_start"] - t["soc_end"]) / 100 * cap
+            mo["km_with_kwh"] += t["distance_km"]
+        hours = t.get("park_drain_hours")
+        if hours is None and not t["park_charged"]:
+            hours = t.get("park_hours")
+        if t["park_soc_drop"] is not None and hours and hours >= IDLE_MIN_HOURS:
+            mo["idle_hours"] += hours
+            mo["idle_drop"] += t["park_soc_drop"]
+        if t.get("end_place"):
+            places[t["end_place"]] = places.get(t["end_place"], 0) + 1
+    for c in charges:
+        mo = months.get(_month_key(c["start_ts"]))
+        if mo is None:
+            continue
+        mo["charges"] += 1
+        mo["charged_kwh"] += c.get("kwh_meter") or c.get("kwh_car") or 0
+        mo["cost"] += c.get("cost") or 0
+    top = sorted(places.items(), key=lambda kv: -kv[1])[:8]
+    connection.send_result(
+        msg["id"],
+        {
+            "months": [{"month": k, **v} for k, v in months.items()],
+            "top_places": [{"name": n, "count": c} for n, c in top],
+        },
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/routes",
+        vol.Required("entry_id"): str,
+        vol.Required("start"): vol.Coerce(float),
+        vol.Optional("end"): vol.Coerce(float),
+    }
+)
+@websocket_api.async_response
+async def ws_routes(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
+    entry = _car(hass, msg["entry_id"])
+    logger = entry.runtime_data
+    rows = await hass.async_add_executor_job(
+        logger.db.routes, logger.car_id, msg["start"], msg.get("end", time.time() + 86400)
+    )
+    connection.send_result(msg["id"], rows)
 
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/places"})

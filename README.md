@@ -30,6 +30,13 @@ Copy `custom_components/mb_logbook` into your `config/custom_components` folder 
 
 When a car is added, MB Logbook rebuilds its earlier trips and charges from Home Assistant's recorded history (as far back as your recorder keeps it), using the same rules as live logging. Run the **MB Logbook: Import history** action to do it again; it only replaces previously imported rows, never live ones.
 
+## Sidebar page
+
+MB Logbook adds an **MB Logbook** page to the sidebar:
+
+- **Overview**: this month's trips, distance, energy, efficiency, charging and idle drain against last month; 12-month charts of distance, energy used vs charged, charging cost and efficiency; a map of this month's routes; your most-visited places.
+- **Logbook**: the full logbook (trips, charging, places) for the selected car.
+
 ## Card
 
 Registered automatically as a dashboard resource (and updated on each version); nothing to add by hand.

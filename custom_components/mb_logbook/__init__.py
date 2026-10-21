@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from homeassistant.components import panel_custom
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.components.lovelace.const import LOVELACE_DATA
@@ -33,7 +34,9 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR]
-CARD_URL = "/mb_logbook/mb-logbook-card.js"
+STATIC_URL = "/mb_logbook"
+CARD_URL = f"{STATIC_URL}/mb-logbook-card.js"
+PANEL_PATH = "mb-logbook"
 
 type LogbookConfigEntry = ConfigEntry[CarLogger]
 
@@ -46,12 +49,28 @@ async def _async_setup_shared(hass: HomeAssistant) -> LogbookDB:
     await hass.async_add_executor_job(db.open)
     data["db"] = db
     async_register_websocket(hass)
-    card = Path(__file__).parent / "frontend" / "mb-logbook-card.js"
+    folder = Path(__file__).parent / "frontend"
     await hass.http.async_register_static_paths(
-        [StaticPathConfig(CARD_URL, str(card), True)]
+        [StaticPathConfig(STATIC_URL, str(folder), True)]
     )
     await _async_register_card(hass)
+    await _async_register_panel(hass)
     return db
+
+
+async def _async_register_panel(hass: HomeAssistant) -> None:
+    """Sidebar page: overview charts and the full logbook."""
+    await panel_custom.async_register_panel(
+        hass,
+        webcomponent_name="mb-logbook-panel",
+        frontend_url_path=PANEL_PATH,
+        module_url=f"{STATIC_URL}/mb-logbook-panel.js?v={VERSION}",
+        sidebar_title="MB Logbook",
+        sidebar_icon="mdi:notebook-outline",
+        require_admin=False,
+        embed_iframe=False,
+        config={"card_url": f"{CARD_URL}?v={VERSION}"},
+    )
 
 
 async def _async_register_card(hass: HomeAssistant) -> None:

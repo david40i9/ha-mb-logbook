@@ -226,6 +226,18 @@ class LogbookDB:
             return None
         return rows[0]["car"], json.loads(rows[0]["points"] or "[]")
 
+    def routes(self, car: str, start_ts: float, end_ts: float, limit: int = 300) -> list[dict[str, Any]]:
+        """Route points of every trip in a period (for an all-trips map)."""
+        rows = self._exec(
+            "SELECT id, start_ts, points FROM trips WHERE car = ? AND start_ts >= ? AND start_ts < ? "
+            "ORDER BY start_ts DESC LIMIT ?",
+            (car, start_ts, end_ts, limit),
+        )
+        return [
+            {"id": r["id"], "start_ts": r["start_ts"], "points": json.loads(r["points"] or "[]")}
+            for r in rows
+        ]
+
     def delete_trip(self, trip_id: int) -> None:
         self._exec("DELETE FROM trips WHERE id = ?", (trip_id,))
 
