@@ -352,10 +352,30 @@ class MBLogbookCard extends HTMLElement {
 
   // ----- tables -----------------------------------------------------------------------
 
+  /** A charging session shown in the trip list, between the trips around it. */
+  _chargeLine(c) {
+    const kwh = c.kwh_meter ?? c.kwh_car;
+    const t = (ts) => this._time(ts);
+    const bits = [
+      `${t(c.start_ts)}–${t(c.end_ts)}`,
+      `${c.soc_start ?? "–"}→${c.soc_end ?? "–"}%`,
+      kwh != null ? `${kwh.toFixed(1)} kWh` : null,
+      c.cost ? this._money(c.cost) : null,
+    ].filter(Boolean);
+    const where = c.place ? esc(c.place) : "unnamed place";
+    return `<tr class=chargeline><td colspan=8>⚡ Charged at ${where} <span class=dim>· ${bits.join(" · ")}</span></td></tr>`;
+  }
+
   _tripRows() {
     if (!this._trips.length) return `<tr><td colspan=8 class=empty>No trips in this period yet.</td></tr>`;
-    return this._trips
-      .map((x) => {
+    // Newest first, with each charge placed between the trips it fell between.
+    const items = [
+      ...this._trips.map((x) => ({ ts: x.start_ts, trip: x })),
+      ...this._charges.map((c) => ({ ts: c.start_ts, charge: c })),
+    ].sort((a, b) => b.ts - a.ts);
+    return items
+      .map(({ trip: x, charge }) => {
+        if (charge) return this._chargeLine(charge);
         const kwh = this._kwh(x);
         const used = x.soc_start != null && x.soc_end != null ? `${x.soc_start}→${x.soc_end}%` : "–";
         let park = "–";
@@ -626,12 +646,13 @@ MBLogbookCard.css = `
   .nameform button.primary { background: var(--primary-color); color: var(--text-primary-color, #fff); border-color: var(--primary-color); }
   .nameform .dim { flex-basis: 100%; }
   #mapbox { height: 320px; border-radius: 10px; overflow: hidden; }
+  tr.chargeline td { padding: 4px 6px; font-size: .85em; color: var(--success-color, #a6e3a1); background: color-mix(in srgb, var(--success-color, #a6e3a1) 7%, transparent); }
   #mapbox.small { height: 240px; }
   td button.pmap { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--divider-color); background: none; color: var(--primary-text-color); font: inherit; cursor: pointer; }
   #mapbox ha-map { height: 100%; display: block; }
 `;
 
-const CARD_VERSION = "0.5.1";
+const CARD_VERSION = "0.5.2";
 
 if (!customElements.get("mb-logbook-card")) {
   customElements.define("mb-logbook-card", MBLogbookCard);
