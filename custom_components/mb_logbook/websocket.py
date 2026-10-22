@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
 
@@ -75,17 +76,17 @@ OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 # Things worth naming a stop after: shops, cafés, car parks, chargers, stations...
 POI_KEYS = "shop|amenity|tourism|leisure|office|craft|healthcare|railway|public_transport|club|sport|aeroway"
 USER_AGENT = f"MB-Logbook/{VERSION} (Home Assistant integration)"
+# UK-style postcodes (and bare outward codes) that sometimes come back as names.
+POSTCODE_RE = re.compile(r"^[A-Z]{1,2}\d[A-Z\d]?(\s*\d[A-Z]{2})?$", re.IGNORECASE)
 LOOKUP_TIMEOUT = aiohttp.ClientTimeout(total=10)
 
 
 async def _photon(session, lat: float, lon: float, radius: float) -> list[dict[str, Any]]:
-    """Photon (OpenStreetMap data, by Komoot): businesses near the point, plus a
-    plain lookup for the street name as a fallback suggestion."""
+    """Photon (OpenStreetMap data, by Komoot): businesses and venues near the point."""
     base = [("lat", f"{lat:.6f}"), ("lon", f"{lon:.6f}"), ("radius", f"{radius / 1000:.2f}"), ("lang", "en")]
     pois = base + [("limit", "20")] + [("osm_tag", k) for k in POI_KEYS.split("|")]
-    plain = base + [("limit", "5")]
     features = []
-    for params in (pois, plain):
+    for params in (pois,):
         async with session.get(
             PHOTON_URL, params=params, headers={"User-Agent": USER_AGENT}, timeout=LOOKUP_TIMEOUT
         ) as resp:
@@ -180,9 +181,11 @@ async def ws_suggest_names(hass: HomeAssistant, connection, msg: dict[str, Any])
         item = {"name": f["name"], "kind": str(f["kind"]).replace("_", " "), "distance_m": round(dist), "rank": rank}
         if f["name"] not in best or (rank, dist) < (best[f["name"]]["rank"], best[f["name"]]["distance_m"]):
             best[f["name"]] = item
-    ordered = sorted(best.values(), key=lambda s: (s["rank"], s["distance_m"]))
-    # Up to ten businesses, then at most two street/area names as a fallback.
-    suggestions = [s for s in ordered if s["rank"] == 0][:10] + [s for s in ordered if s["rank"] == 1][:2]
+    # Businesses and venues only: no streets, areas or postcodes.
+    suggestions = sorted(
+        (s for s in best.values() if s["rank"] == 0 and not POSTCODE_RE.match(s["name"])),
+        key=lambda s: s["distance_m"],
+    )[:10]
     connection.send_result(msg["id"], suggestions)
 
 
