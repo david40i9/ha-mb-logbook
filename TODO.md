@@ -38,3 +38,4 @@ Ranked by value for effort, keeping MB Logbook local-only and multi-car.
 - [x] Charges shown between trips; parks keep their charged flag (0.5)
 - [x] Sidebar page with overview charts and routes map (0.6)
 - [x] Period arrows, delete trip, charging rates with history (0.7)
+- [x] Suggest names for unnamed places from OpenStreetMap, on request only (0.8)

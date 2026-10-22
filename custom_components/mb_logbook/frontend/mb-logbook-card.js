@@ -144,6 +144,42 @@ class MBLogbookCard extends HTMLElement {
       .join("");
   }
 
+  /** Nearby named places from OpenStreetMap, only when the user asks. */
+  async _suggestNames() {
+    const box = this.shadowRoot.getElementById("psuggestions");
+    const save = this.shadowRoot.getElementById("psave");
+    if (!box || !save) return;
+    const e = this._edit;
+    const lat = e ? e.lat : Number(save.dataset.lat);
+    const lon = e ? e.lon : Number(save.dataset.lon);
+    const radius = e ? e.radius : Number(this.shadowRoot.getElementById("pradius")?.value || 100);
+    box.innerHTML = `<span class=dim>Asking OpenStreetMap…</span>`;
+    let list;
+    try {
+      list = await this._hass.callWS({ type: "mb_logbook/suggest_names", lat, lon, radius_m: Math.max(radius, 150) });
+    } catch (err) {
+      box.innerHTML = `<span class=dim>${esc(err.message || err.code || "Lookup failed")}</span>`;
+      return;
+    }
+    if (!list.length) {
+      box.innerHTML = `<span class=dim>Nothing named nearby on OpenStreetMap.</span>`;
+      return;
+    }
+    box.innerHTML = list
+      .map(
+        (s, i) =>
+          `<button class=suggestion data-i="${i}" title="${esc(s.kind)}">${esc(s.name)} <span class=dim>${s.distance_m} m${s.kind ? " · " + esc(s.kind) : ""}</span></button>`
+      )
+      .join("");
+    box.querySelectorAll("button.suggestion").forEach((b) =>
+      b.addEventListener("click", () => {
+        const input = this.shadowRoot.getElementById("pname");
+        input.value = list[Number(b.dataset.i)].name;
+        input.focus();
+      })
+    );
+  }
+
   _date(ts) {
     return new Date(ts * 1000).toLocaleDateString(this._hass.locale?.language, { day: "numeric", month: "short", year: "numeric" });
   }
@@ -386,6 +422,8 @@ class MBLogbookCard extends HTMLElement {
         <select id=pradius title="Anything within this distance gets the name">${radii}</select>
         <button class=primary id=psave data-lat="${lat}" data-lon="${lon}">Save</button>
         <button id=pcancel>Cancel</button>
+        <button id=psuggest title="Asks OpenStreetMap for named places near the pin. Only this point is sent.">Suggest names</button>
+        <div id=psuggestions class=suggestions></div>
         <div class=dim>Drag the pin on the map to move the place, or the circle's edge to resize it. The name applies to every trip and charge that starts or ends inside the circle, past and future.</div>
       </div>`;
   }
@@ -677,6 +715,7 @@ class MBLogbookCard extends HTMLElement {
       };
       save.addEventListener("click", submit);
       root.getElementById("pname").addEventListener("keydown", (e) => e.key === "Enter" && submit());
+      root.getElementById("psuggest").addEventListener("click", () => this._suggestNames());
       root.getElementById("pcancel").addEventListener("click", () => {
         this._naming = null;
         this._render();
@@ -774,6 +813,9 @@ MBLogbookCard.css = `
   .seg { display: inline-flex; border: 1px solid var(--divider-color); border-radius: 10px; overflow: hidden; }
   .seg button { background: none; border: 0; color: var(--secondary-text-color); padding: 6px 12px; font: inherit; cursor: pointer; }
   .seg button.on { background: var(--primary-color); color: var(--text-primary-color, #fff); }
+  .suggestions { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 6px; }
+  button.suggestion { padding: 4px 10px; border-radius: 14px; border: 1px solid var(--divider-color); background: var(--secondary-background-color); color: var(--primary-text-color); font: inherit; font-size: .9em; cursor: pointer; }
+  button.suggestion:hover { border-color: var(--primary-color); }
   h3.sub { font-size: 1em; font-weight: 600; margin: 18px 0 6px; }
   .ratehist { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
   button.ratedel { padding: 2px 8px; border-radius: 6px; border: 1px solid var(--divider-color); background: none; color: var(--secondary-text-color); font: inherit; font-size: .85em; cursor: pointer; }
@@ -814,7 +856,7 @@ MBLogbookCard.css = `
   #mapbox ha-map { height: 100%; display: block; }
 `;
 
-const CARD_VERSION = "0.7.0";
+const CARD_VERSION = "0.8.0";
 
 if (!customElements.get("mb-logbook-card")) {
   customElements.define("mb-logbook-card", MBLogbookCard);

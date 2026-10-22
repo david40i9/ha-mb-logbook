@@ -11,7 +11,7 @@ A Home Assistant integration that keeps a permanent logbook for Mercedes-Benz el
 
 It reads the entities of the [mbapi2020](https://github.com/ReneNulschDE/mbapi2020) integration (any car that exposes an odometer, battery %, ignition state and GPS tracker works). It does not talk to Mercedes itself.
 
-**Privacy:** everything stays in Home Assistant. Places are named from your own Home Assistant zones and your own named places; there is no address lookup service. The route map is Home Assistant's built-in map component, which loads the same map tiles as the standard map card.
+**Privacy:** everything stays in Home Assistant. Places are named from your own Home Assistant zones and your own named places; there is no automatic address lookup. The one exception is optional: when naming a place you can press **Suggest names**, which asks OpenStreetMap (Overpass API) for named shops and venues near the pin. That sends only that one point, only when you press it. The route map is Home Assistant's built-in map component, which loads the same map tiles as the standard map card.
 
 ## Status
 

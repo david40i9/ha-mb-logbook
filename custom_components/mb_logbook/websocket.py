@@ -5,11 +5,13 @@ from __future__ import annotations
 import time
 from typing import Any
 
+import aiohttp
 import voluptuous as vol
 
 from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.util import dt as dt_util
 
@@ -22,8 +24,10 @@ from .const import (
     IDLE_MIN_HOURS,
     SIGNAL_UPDATED,
     UNIT_KM,
+    VERSION,
     entry_conf,
 )
+from .db import distance_m
 
 
 def _entries(hass: HomeAssistant) -> dict[str, Any]:
@@ -48,6 +52,7 @@ def async_register_websocket(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_trip_points)
     websocket_api.async_register_command(hass, ws_charges)
     websocket_api.async_register_command(hass, ws_delete_trip)
+    websocket_api.async_register_command(hass, ws_suggest_names)
     websocket_api.async_register_command(hass, ws_rates)
     websocket_api.async_register_command(hass, ws_rate_save)
     websocket_api.async_register_command(hass, ws_rate_delete)
@@ -63,6 +68,71 @@ def _refresh_all(hass: HomeAssistant) -> None:
     """Place names feed the last-trip/last-charge attributes of every car."""
     for entry in _entries(hass).values():
         async_dispatcher_send(hass, SIGNAL_UPDATED.format(entry.runtime_data.car_id))
+
+
+OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+# Things worth naming a stop after: shops, cafés, car parks, chargers, stations...
+POI_KEYS = "shop|amenity|tourism|leisure|office|craft|healthcare|railway|public_transport|club|sport"
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/suggest_names",
+        vol.Required("lat"): vol.All(vol.Coerce(float), vol.Range(min=-90, max=90)),
+        vol.Required("lon"): vol.All(vol.Coerce(float), vol.Range(min=-180, max=180)),
+        vol.Optional("radius_m", default=150): vol.All(vol.Coerce(float), vol.Range(min=20, max=1000)),
+    }
+)
+@websocket_api.async_response
+async def ws_suggest_names(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
+    """Named businesses/places near a point, from OpenStreetMap (Overpass API).
+
+    Only runs when the user asks for suggestions, and sends nothing but this
+    one point; no car, trip or account data.
+    """
+    lat, lon = msg["lat"], msg["lon"]
+    radius = max(80.0, msg["radius_m"])
+    query = (
+        f"[out:json][timeout:10];"
+        f'nwr(around:{radius:.0f},{lat:.6f},{lon:.6f})[name][~"^({POI_KEYS})$"~"."];'
+        f"out center tags 60;"
+    )
+    session = async_get_clientsession(hass)
+    try:
+        async with session.post(
+            OVERPASS_URL,
+            data={"data": query},
+            headers={"User-Agent": f"MB-Logbook/{VERSION} (Home Assistant integration)"},
+            timeout=aiohttp.ClientTimeout(total=15),
+        ) as resp:
+            if resp.status != 200:
+                connection.send_error(msg["id"], "lookup_failed", f"OpenStreetMap said {resp.status}")
+                return
+            data = await resp.json(content_type=None)
+    except (aiohttp.ClientError, TimeoutError) as err:
+        connection.send_error(msg["id"], "lookup_failed", f"Couldn't reach OpenStreetMap: {err}")
+        return
+
+    seen: dict[str, dict[str, Any]] = {}
+    for el in data.get("elements", []):
+        tags = el.get("tags") or {}
+        name = tags.get("name")
+        plat = el.get("lat", (el.get("center") or {}).get("lat"))
+        plon = el.get("lon", (el.get("center") or {}).get("lon"))
+        if not name or plat is None or plon is None:
+            continue
+        kind = next((tags[k] for k in POI_KEYS.split("|") if k in tags), "")
+        dist = distance_m(lat, lon, plat, plon)
+        if name not in seen or dist < seen[name]["distance_m"]:
+            seen[name] = {
+                "name": name,
+                "kind": str(kind).replace("_", " "),
+                "distance_m": round(dist),
+                "lat": plat,
+                "lon": plon,
+            }
+    suggestions = sorted(seen.values(), key=lambda s: s["distance_m"])[:10]
+    connection.send_result(msg["id"], suggestions)
 
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/rates"})
