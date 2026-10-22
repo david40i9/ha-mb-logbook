@@ -276,15 +276,34 @@ class MBLogbookPanel extends HTMLElement {
         <div class=stepper><button class=step data-ms="1" title="Previous">‹</button><span class=range>${escp(label)}</span><button class=step data-ms="-1" title="Next" ${this._mOffset === 0 ? "disabled" : ""}>›</button></div></div>`;
     box.innerHTML = `${head}<div class=dim>Loading…</div>`;
     this._wireMileage(box);
-    let trips;
+    // One fetch covers the chart's periods, ending with the chosen one.
+    const n = { week: 12, month: 12, quarter: 8, year: 5 }[this._mPeriod];
+    const spans = Array.from({ length: n }, (_, i) => this._range(this._mPeriod, this._mOffset + n - 1 - i));
+    let all;
     try {
-      trips = await this._hass.callWS({ type: "mb_logbook/trips", entry_id: car.entry_id, start, end });
+      all = await this._hass.callWS({ type: "mb_logbook/trips", entry_id: car.entry_id, start: spans[0].start, end });
     } catch (e) {
       box.innerHTML = `${head}<div class=dim>Couldn't load trips.</div>`;
       this._wireMileage(box);
       return;
     }
     if (this._car !== car) return;
+    const trips = all.filter((t) => t.start_ts >= start);
+    const loc = this._hass?.locale?.language;
+    const barLabel = (s) => {
+      const d = new Date(s.start * 1000);
+      if (this._mPeriod === "week") return d.toLocaleDateString(loc, { day: "numeric", month: "short" });
+      if (this._mPeriod === "month") return d.toLocaleDateString(loc, { month: "short" });
+      if (this._mPeriod === "quarter") return d.toLocaleDateString(loc, { month: "short", year: "2-digit" });
+      return String(d.getFullYear());
+    };
+    const biz = spans.map((s) => all.filter((t) => t.label === "Business" && t.start_ts >= s.start && t.start_ts < s.end).reduce((a, t) => a + t.distance_km, 0));
+    const chart = this._chart(
+      `Business mileage (${this._du})`,
+      spans.map(barLabel),
+      [{ values: biz.map((k) => +this._d(k, 1)), colour: "#89b4fa" }],
+      (v) => v.toFixed(1)
+    );
     const groups = new Map();
     for (const t of trips) {
       const k = t.label || "";
@@ -306,6 +325,7 @@ class MBLogbookPanel extends HTMLElement {
       })
       .join("");
     box.innerHTML = `${head}<div class=tiles>${tiles}<div class=tile><div class=k>All trips</div><div class=v>${this._d(totalKm, 1)} ${this._du}</div><div class=delta>${trips.length} trips</div></div></div>
+      <div class=mchart>${chart}</div>
       <div class=dim style="margin-top:8px">Label trips (or give places a default label) in the Logbook tab; export them as CSV from there.</div>`;
     this._wireMileage(box);
   }
@@ -426,6 +446,9 @@ MBLogbookPanel.css = `
   h2 { font-size: 1.05em; font-weight: 600; margin: 0 0 10px; }
   .dim { color: var(--secondary-text-color); font-weight: normal; font-size: .9em; }
   .mhead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+  .mchart { margin-top: 12px; }
+  .mchart .section { padding: 0; margin: 0; background: none; }
+  .mchart h2 { font-size: 14px; }
   .mhead h2 { margin: 0; flex: 1; }
   .stepper { display: inline-flex; align-items: center; gap: 4px; }
   .stepper .range { min-width: 9em; text-align: center; font-weight: 500; }

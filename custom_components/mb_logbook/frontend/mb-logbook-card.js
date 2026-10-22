@@ -23,6 +23,7 @@ class MBLogbookCard extends HTMLElement {
       PERIODS.find(([p]) => p === this._config.period)?.[0] || DAYS_TO_PERIOD[this._config.days] || "month";
     this._offset = 0; // 0 = the current period, 1 = the one before, ...
     this._labelFilter = "all";
+    this._sort = {}; // tab -> { key, dir }, unset = the default order
     this._tab = "trips";
     this._open = null;
     this._cars = null;
@@ -133,7 +134,7 @@ class MBLogbookCard extends HTMLElement {
       return `<tr><td colspan=4 class=empty>No named places yet. Click “unnamed · name it” on a trip or charge to add one.</td></tr>`;
     const admin = this._hass.user?.is_admin;
     const radii = [50, 100, 200, 500, 1000];
-    return this._places
+    return this._sorted(this._places, { name: (p) => p.name, radius: (p) => p.radius_m, uses: (p) => p.uses })
       .map((p) => {
         const opts = [...new Set([...radii, Math.round(p.radius_m)])]
           .sort((a, b) => a - b)
@@ -613,15 +614,48 @@ class MBLogbookCard extends HTMLElement {
     return `<tr class=chargeline><td colspan=9>⚡ Charged at ${where} <span class=dim>· ${bits.join(" · ")}</span></td></tr>`;
   }
 
+  /** A clickable column header that sorts the current tab's table. */
+  _th(key, label, num) {
+    const s = this._sort[this._tab];
+    const arrow = s && s.key === key ? (s.dir > 0 ? " ▲" : " ▼") : "";
+    return `<th class="sort${num ? " n" : ""}${arrow ? " on" : ""}" data-sort="${key}" title="Sort by ${esc(label.toLowerCase())}">${esc(label)}${arrow}</th>`;
+  }
+
+  /** Sort a copy of rows by the tab's chosen column; blanks always last. */
+  _sorted(rows, keys) {
+    const s = this._sort[this._tab];
+    const f = s && keys[s.key];
+    if (!f) return rows;
+    return [...rows].sort((a, b) => {
+      const x = f(a);
+      const y = f(b);
+      if (x == null || x === "") return y == null || y === "" ? 0 : 1;
+      if (y == null || y === "") return -1;
+      return (typeof x === "string" ? x.localeCompare(y) : x - y) * s.dir;
+    });
+  }
+
   _tripRows() {
     const trips = this._shownTrips;
     if (!trips.length) return `<tr><td colspan=9 class=empty>No trips${this._labelFilter !== "all" ? " with this label" : ""} in this period.</td></tr>`;
     // Newest first, with each charge placed between the trips it fell between
     // (charges only when not filtering by label).
-    const items = [
-      ...trips.map((x) => ({ ts: x.start_ts, trip: x })),
-      ...(this._labelFilter === "all" ? this._charges : []).map((c) => ({ ts: c.start_ts, charge: c })),
-    ].sort((a, b) => b.ts - a.ts);
+    // A column sort drops the charge lines, which only make sense in time order.
+    const items = this._sort.trips
+      ? this._sorted(trips, {
+          start: (x) => x.start_ts,
+          route: (x) => `${x.start_place || "zzzz"} → ${x.end_place || "zzzz"}`, // unnamed last
+          label: (x) => x.label || null,
+          dist: (x) => x.distance_km,
+          used: (x) => (x.soc_start != null && x.soc_end != null ? x.soc_start - x.soc_end : null),
+          kwh: (x) => this._kwh(x) || null,
+          eff: (x) => (this._kwh(x) && x.distance_km ? x.distance_km / this._kwh(x) : null),
+          park: (x) => x.park_hours,
+        }).map((x) => ({ trip: x }))
+      : [
+          ...trips.map((x) => ({ ts: x.start_ts, trip: x })),
+          ...(this._labelFilter === "all" ? this._charges : []).map((c) => ({ ts: c.start_ts, charge: c })),
+        ].sort((a, b) => b.ts - a.ts);
     return items
       .map(({ trip: x, charge }) => {
         if (charge) return this._chargeLine(charge);
@@ -657,7 +691,15 @@ class MBLogbookCard extends HTMLElement {
 
   _chargeRows() {
     if (!this._charges.length) return `<tr><td colspan=7 class=empty>No charging sessions in this period.</td></tr>`;
-    return this._charges
+    return this._sorted(this._charges, {
+      start: (c) => c.start_ts,
+      where: (c) => c.place || null,
+      soc: (c) => (c.soc_start != null && c.soc_end != null ? c.soc_end - c.soc_start : null),
+      kwh: (c) => c.kwh_meter ?? c.kwh_car,
+      peak: (c) => c.max_power_kw || null,
+      cost: (c) => c.cost,
+      perkwh: (c) => (c.cost_source === "rate" || c.cost_source === "free" ? c.rate : c.kwh_meter && c.cost ? c.cost / c.kwh_meter : null),
+    })
       .map((c) => {
         const kwh = c.kwh_meter ?? c.kwh_car;
         const src = c.kwh_meter != null ? "metered" : "from battery %";
@@ -702,11 +744,11 @@ class MBLogbookCard extends HTMLElement {
       .join("")}</div>`;
     const table =
       this._tab === "trips"
-        ? `${this._labelBar()}<table><thead><tr><th>Start</th><th>Route</th><th>Label</th><th class=n>Distance</th><th class=n>Battery</th><th class=n>Used</th><th class=n>Efficiency</th><th class=n>Parked before</th><th></th></tr></thead><tbody>${this._tripRows()}</tbody></table>`
+        ? `${this._labelBar()}<table><thead><tr>${this._th("start", "Start")}${this._th("route", "Route")}${this._th("label", "Label")}${this._th("dist", "Distance", 1)}${this._th("used", "Battery", 1)}${this._th("kwh", "Used", 1)}${this._th("eff", "Efficiency", 1)}${this._th("park", "Parked before", 1)}<th></th></tr></thead><tbody>${this._tripRows()}</tbody></table>`
         : this._tab === "charges"
-          ? `<table><thead><tr><th>Start</th><th>Where</th><th class=n>Battery</th><th class=n>Energy</th><th class=n>Peak</th><th class=n>Cost</th><th class=n>Per kWh</th></tr></thead><tbody>${this._chargeRows()}</tbody></table>
+          ? `<table><thead><tr>${this._th("start", "Start")}${this._th("where", "Where")}${this._th("soc", "Battery", 1)}${this._th("kwh", "Energy", 1)}${this._th("peak", "Peak", 1)}${this._th("cost", "Cost", 1)}${this._th("perkwh", "Per kWh", 1)}</tr></thead><tbody>${this._chargeRows()}</tbody></table>
              ${this._rateSection()}`
-          : `<table><thead><tr><th>Name</th><th>Radius</th><th class=n>Trip ends / charges</th><th></th></tr></thead><tbody>${this._placeRows()}</tbody></table>
+          : `<table><thead><tr>${this._th("name", "Name")}${this._th("radius", "Radius")}${this._th("uses", "Trip ends / charges", 1)}<th></th></tr></thead><tbody>${this._placeRows()}</tbody></table>
              <div class="dim pad">Named places are shared by all cars. Home Assistant zones take priority where they overlap.</div>
              ${this._placeLabelSection()}`;
     root.innerHTML = `<style>${MBLogbookCard.css}</style>
@@ -740,6 +782,21 @@ class MBLogbookCard extends HTMLElement {
         this._tab = b.dataset.tab;
         this._naming = null;
         this._open = null;
+        this._openPlace = null;
+        this._render();
+      })
+    );
+    // Header click: sort (text A→Z, numbers biggest first), click again to reverse, a third time to reset.
+    root.querySelectorAll("th[data-sort]").forEach((th) =>
+      th.addEventListener("click", () => {
+        const key = th.dataset.sort;
+        const cur = this._sort[this._tab];
+        const first = th.classList.contains("n") ? -1 : 1;
+        if (!cur || cur.key !== key) this._sort[this._tab] = { key, dir: first };
+        else if (cur.dir === first) cur.dir = -first;
+        else delete this._sort[this._tab];
+        this._open = null;
+        this._naming = null;
         this._openPlace = null;
         this._render();
       })
@@ -1017,6 +1074,8 @@ MBLogbookCard.css = `
   .scroll { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-size: .9em; }
   th { text-align: left; font-weight: 500; color: var(--secondary-text-color); padding: 6px; border-bottom: 1px solid var(--divider-color); white-space: nowrap; }
+  th.sort { cursor: pointer; user-select: none; }
+  th.sort:hover, th.sort.on { color: var(--primary-color); }
   td { padding: 6px; border-bottom: 1px solid var(--divider-color); vertical-align: top; }
   .n { text-align: right; white-space: nowrap; }
   tr.trip { cursor: pointer; }
@@ -1040,7 +1099,7 @@ MBLogbookCard.css = `
   #mapbox ha-map { height: 100%; display: block; }
 `;
 
-const CARD_VERSION = "0.13.0";
+const CARD_VERSION = "0.14.0";
 
 if (!customElements.get("mb-logbook-card")) {
   customElements.define("mb-logbook-card", MBLogbookCard);
