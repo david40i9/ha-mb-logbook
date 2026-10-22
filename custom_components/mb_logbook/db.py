@@ -62,6 +62,12 @@ CREATE TABLE IF NOT EXISTS places (
     lon REAL NOT NULL,
     radius_m REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS trip_labels (
+    car TEXT NOT NULL,
+    start_ts INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    PRIMARY KEY (car, start_ts)
+);
 CREATE TABLE IF NOT EXISTS place_anchors (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     place_id INTEGER NOT NULL,
@@ -325,14 +331,44 @@ class LogbookDB:
             (car, start_ts, end_ts, limit),
         )
         places = self.places()
+        labels = self._labels(car)
         out = []
         for r in rows:
             d = dict(r)
             pts = d.pop("points") or "[]"
             d["point_count"] = len(json.loads(pts))
             d["park_charged"] = bool(d["park_charged"])
+            d["label"] = labels.get(round(d["start_ts"]))
             out.append(self._name_trip(d, places))
         return out
+
+    # ----- trip labels -------------------------------------------------------------------
+    # Kept apart from the trips table, keyed by car + start time (whole seconds),
+    # so re-importing history (which rebuilds trip rows) never loses them.
+
+    def _labels(self, car: str) -> dict[int, str]:
+        return {
+            r["start_ts"]: r["label"]
+            for r in self._exec("SELECT start_ts, label FROM trip_labels WHERE car = ?", (car,))
+        }
+
+    def set_trip_label(self, trip_id: int, label: str | None) -> bool:
+        rows = self._exec("SELECT car, start_ts FROM trips WHERE id = ?", (trip_id,))
+        if not rows:
+            return False
+        car, ts = rows[0]["car"], round(rows[0]["start_ts"])
+        if label:
+            self._exec(
+                "INSERT INTO trip_labels (car, start_ts, label) VALUES (?, ?, ?) "
+                "ON CONFLICT (car, start_ts) DO UPDATE SET label = excluded.label",
+                (car, ts, label),
+            )
+        else:
+            self._exec("DELETE FROM trip_labels WHERE car = ? AND start_ts = ?", (car, ts))
+        return True
+
+    def label_names(self) -> list[str]:
+        return [r["label"] for r in self._exec("SELECT DISTINCT label FROM trip_labels ORDER BY label")]
 
     def trip_points(self, trip_id: int) -> tuple[str, list] | None:
         rows = self._exec("SELECT car, points FROM trips WHERE id = ?", (trip_id,))

@@ -54,6 +54,8 @@ def async_register_websocket(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_charges)
     websocket_api.async_register_command(hass, ws_delete_trip)
     websocket_api.async_register_command(hass, ws_suggest_names)
+    websocket_api.async_register_command(hass, ws_trip_label)
+    websocket_api.async_register_command(hass, ws_labels)
     websocket_api.async_register_command(hass, ws_rates)
     websocket_api.async_register_command(hass, ws_rate_save)
     websocket_api.async_register_command(hass, ws_rate_delete)
@@ -187,6 +189,37 @@ async def ws_suggest_names(hass: HomeAssistant, connection, msg: dict[str, Any])
         key=lambda s: s["distance_m"],
     )[:10]
     connection.send_result(msg["id"], suggestions)
+
+
+DEFAULT_LABELS = ["Business", "Personal", "Commute"]
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/labels"})
+@websocket_api.async_response
+async def ws_labels(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
+    """Labels to offer: the defaults plus any custom ones already used."""
+    db = hass.data[DOMAIN]["db"]
+    used = await hass.async_add_executor_job(db.label_names)
+    connection.send_result(msg["id"], DEFAULT_LABELS + [x for x in used if x not in DEFAULT_LABELS])
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/trip_label",
+        vol.Required("trip_id"): int,
+        vol.Optional("label"): vol.Any(None, vol.All(str, vol.Strip, vol.Length(max=30))),
+    }
+)
+@websocket_api.async_response
+async def ws_trip_label(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
+    """Set (or clear, with an empty/None label) a trip's label."""
+    db = hass.data[DOMAIN]["db"]
+    ok = await hass.async_add_executor_job(db.set_trip_label, msg["trip_id"], msg.get("label") or None)
+    if not ok:
+        connection.send_error(msg["id"], "not_found", "No such trip")
+        return
+    connection.send_result(msg["id"], {"trip_id": msg["trip_id"], "label": msg.get("label") or None})
 
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/rates"})

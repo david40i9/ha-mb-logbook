@@ -22,6 +22,7 @@ class MBLogbookCard extends HTMLElement {
     this._period =
       PERIODS.find(([p]) => p === this._config.period)?.[0] || DAYS_TO_PERIOD[this._config.days] || "month";
     this._offset = 0; // 0 = the current period, 1 = the one before, ...
+    this._labelFilter = "all";
     this._tab = "trips";
     this._open = null;
     this._cars = null;
@@ -107,13 +108,15 @@ class MBLogbookCard extends HTMLElement {
     }
     const { start, end } = this._range();
     const args = { entry_id: this._car.entry_id, start, end };
-    const [trips, charges, places, rates] = await Promise.all([
+    const [trips, charges, places, rates, labels] = await Promise.all([
       this._hass.callWS({ type: "mb_logbook/trips", ...args }),
       this._hass.callWS({ type: "mb_logbook/charges", ...args }),
       this._hass.callWS({ type: "mb_logbook/places" }),
       this._hass.callWS({ type: "mb_logbook/rates" }).catch(() => ({ locations: [], rates: [] })),
+      this._hass.callWS({ type: "mb_logbook/labels" }).catch(() => ["Business", "Personal", "Commute"]),
     ]);
     this._rates = rates;
+    this._labels = labels;
     this._trips = trips;
     this._charges = charges;
     this._places = places;
@@ -476,7 +479,7 @@ class MBLogbookCard extends HTMLElement {
   }
 
   _tripTiles() {
-    const t = this._trips;
+    const t = this._shownTrips;
     const km = t.reduce((s, x) => s + x.distance_km, 0);
     let kwh = 0;
     let kmKnown = 0;
@@ -504,6 +507,75 @@ class MBLogbookCard extends HTMLElement {
 
   // ----- tables -----------------------------------------------------------------------
 
+  /** Trips after the label filter. */
+  get _shownTrips() {
+    const f = this._labelFilter || "all";
+    if (f === "all") return this._trips;
+    if (f === "__none") return this._trips.filter((t) => !t.label);
+    return this._trips.filter((t) => t.label === f);
+  }
+
+  _labelCell(x) {
+    if (!this._hass.user?.is_admin) return x.label ? `<span class=chip>${esc(x.label)}</span>` : "";
+    const opts = [...new Set([...(this._labels || []), ...(x.label ? [x.label] : [])])];
+    return `<select class=tlabel data-id="${x.id}">
+        <option value="">–</option>
+        ${opts.map((l) => `<option value="${esc(l)}" ${l === x.label ? "selected" : ""}>${esc(l)}</option>`).join("")}
+        <option value="__other">Other…</option>
+      </select>`;
+  }
+
+  /** Label filter, per-label distance and CSV export, above the trips table. */
+  _labelBar() {
+    const present = [...new Set(this._trips.map((t) => t.label).filter(Boolean))];
+    const filters = [["all", "All"], ...present.map((l) => [l, l]), ["__none", "Unlabelled"]];
+    const f = this._labelFilter || "all";
+    const byLabel = present
+      .map((l) => `${esc(l)} ${this._dist(this._trips.filter((t) => t.label === l).reduce((s, t) => s + t.distance_km, 0))}`)
+      .join(" · ");
+    return `<div class=labelbar>
+        <div class=seg>${filters.map(([v, l]) => `<button data-lfilter="${esc(v)}" class="${v === f ? "on" : ""}">${esc(l)}</button>`).join("")}</div>
+        <span class=dim>${byLabel}</span>
+        <button class=csv title="Download the trips shown, for mileage claims">Export CSV</button>
+      </div>`;
+  }
+
+  _exportCsv() {
+    const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const unit = this._miles ? "mi" : "km";
+    const k = this._miles ? 1 / KM_PER_MI : 1;
+    const loc = this._hass.locale?.language;
+    const rows = [["Date", "Start time", "End time", "From", "To", `Distance (${unit})`, `Odometer start (${unit})`, `Odometer end (${unit})`, "Label", "Battery start %", "Battery end %"]];
+    for (const t of [...this._shownTrips].sort((a, b) => a.start_ts - b.start_ts)) {
+      const s = new Date(t.start_ts * 1000);
+      const e = new Date(t.end_ts * 1000);
+      rows.push([
+        s.toLocaleDateString(loc),
+        s.toLocaleTimeString(loc, { hour: "2-digit", minute: "2-digit" }),
+        e.toLocaleTimeString(loc, { hour: "2-digit", minute: "2-digit" }),
+        t.start_place || (t.start_lat != null ? `${t.start_lat.toFixed(5)}, ${t.start_lon.toFixed(5)}` : ""),
+        t.end_place || (t.end_lat != null ? `${t.end_lat.toFixed(5)}, ${t.end_lon.toFixed(5)}` : ""),
+        (t.distance_km * k).toFixed(1),
+        t.odo_start_km != null ? (t.odo_start_km * k).toFixed(0) : "",
+        t.odo_end_km != null ? (t.odo_end_km * k).toFixed(0) : "",
+        t.label || "",
+        t.soc_start ?? "",
+        t.soc_end ?? "",
+      ]);
+    }
+    const csv = rows.map((r) => r.map(q).join(",")).join("\r\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
+    const f = this._labelFilter && this._labelFilter !== "all" ? `-${this._labelFilter === "__none" ? "unlabelled" : this._labelFilter}` : "";
+    a.download = `${this._car.name}-trips-${this._range().label.replace(/[^\w]+/g, "-")}${f}.csv`.toLowerCase();
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      URL.revokeObjectURL(a.href);
+      a.remove();
+    }, 1000);
+  }
+
   /** A charging session shown in the trip list, between the trips around it. */
   _chargeLine(c) {
     const kwh = c.kwh_meter ?? c.kwh_car;
@@ -515,15 +587,17 @@ class MBLogbookCard extends HTMLElement {
       c.cost ? this._money(c.cost) : null,
     ].filter(Boolean);
     const where = c.place ? esc(c.place) : "unnamed place";
-    return `<tr class=chargeline><td colspan=8>⚡ Charged at ${where} <span class=dim>· ${bits.join(" · ")}</span></td></tr>`;
+    return `<tr class=chargeline><td colspan=9>⚡ Charged at ${where} <span class=dim>· ${bits.join(" · ")}</span></td></tr>`;
   }
 
   _tripRows() {
-    if (!this._trips.length) return `<tr><td colspan=8 class=empty>No trips in this period.</td></tr>`;
-    // Newest first, with each charge placed between the trips it fell between.
+    const trips = this._shownTrips;
+    if (!trips.length) return `<tr><td colspan=9 class=empty>No trips${this._labelFilter !== "all" ? " with this label" : ""} in this period.</td></tr>`;
+    // Newest first, with each charge placed between the trips it fell between
+    // (charges only when not filtering by label).
     const items = [
-      ...this._trips.map((x) => ({ ts: x.start_ts, trip: x })),
-      ...this._charges.map((c) => ({ ts: c.start_ts, charge: c })),
+      ...trips.map((x) => ({ ts: x.start_ts, trip: x })),
+      ...(this._labelFilter === "all" ? this._charges : []).map((c) => ({ ts: c.start_ts, charge: c })),
     ].sort((a, b) => b.ts - a.ts);
     return items
       .map(({ trip: x, charge }) => {
@@ -546,13 +620,14 @@ class MBLogbookCard extends HTMLElement {
         return `<tr class="trip ${open ? "open" : ""}" data-id="${x.id}">
             <td>${this._when(x.start_ts)}<div class=dim>${this._dur(x.end_ts - x.start_ts)}</div></td>
             <td>${this._place(x.start_place, x.start_lat, "trip", x.id, "start")} → ${this._place(x.end_place, x.end_lat, "trip", x.id, "end")}</td>
+            <td>${this._labelCell(x)}</td>
             <td class=n>${this._dist(x.distance_km)}</td>
             <td class=n>${used}</td>
             <td class=n>${kwh ? kwh.toFixed(1) + " kWh" : "–"}</td>
             <td class=n>${this._eff(x.distance_km, kwh)}</td>
             <td class=n>${park}</td>
             <td class=n>${x.point_count > 1 ? "🗺" : ""}</td>
-          </tr>${open ? `<tr class=maprow><td colspan=8>${form}<div id=mapbox></div>${this._hass.user?.is_admin && !naming ? `<div class=tripactions><button class=deltrip data-id="${x.id}">Delete this trip</button></div>` : ""}</td></tr>` : ""}`;
+          </tr>${open ? `<tr class=maprow><td colspan=9>${form}<div id=mapbox></div>${this._hass.user?.is_admin && !naming ? `<div class=tripactions><button class=deltrip data-id="${x.id}">Delete this trip</button></div>` : ""}</td></tr>` : ""}`;
       })
       .join("");
   }
@@ -604,7 +679,7 @@ class MBLogbookCard extends HTMLElement {
       .join("")}</div>`;
     const table =
       this._tab === "trips"
-        ? `<table><thead><tr><th>Start</th><th>Route</th><th class=n>Distance</th><th class=n>Battery</th><th class=n>Used</th><th class=n>Efficiency</th><th class=n>Parked before</th><th></th></tr></thead><tbody>${this._tripRows()}</tbody></table>`
+        ? `${this._labelBar()}<table><thead><tr><th>Start</th><th>Route</th><th>Label</th><th class=n>Distance</th><th class=n>Battery</th><th class=n>Used</th><th class=n>Efficiency</th><th class=n>Parked before</th><th></th></tr></thead><tbody>${this._tripRows()}</tbody></table>`
         : this._tab === "charges"
           ? `<table><thead><tr><th>Start</th><th>Where</th><th class=n>Battery</th><th class=n>Energy</th><th class=n>Peak</th><th class=n>Cost</th><th class=n>Per kWh</th></tr></thead><tbody>${this._chargeRows()}</tbody></table>`
           : `<table><thead><tr><th>Name</th><th>Radius</th><th class=n>Trip ends / charges</th><th></th></tr></thead><tbody>${this._placeRows()}</tbody></table>
@@ -690,6 +765,35 @@ class MBLogbookCard extends HTMLElement {
         this._render();
       })
     );
+    root.querySelectorAll("button[data-lfilter]").forEach((b) =>
+      b.addEventListener("click", () => {
+        this._labelFilter = b.dataset.lfilter;
+        this._open = null;
+        this._render();
+      })
+    );
+    root.querySelector("button.csv")?.addEventListener("click", () => this._exportCsv());
+    root.querySelectorAll("select.tlabel").forEach((s) => {
+      s.addEventListener("click", (ev) => ev.stopPropagation());
+      s.addEventListener("change", async () => {
+        const id = Number(s.dataset.id);
+        let label = s.value;
+        if (label === "__other") {
+          label = (prompt("Label for this trip (e.g. Client visit):") || "").trim().slice(0, 30);
+          if (!label) return this._render();
+        }
+        try {
+          await this._hass.callWS({ type: "mb_logbook/trip_label", trip_id: id, label: label || null });
+        } catch (e) {
+          alert(`Couldn't save the label: ${e.message || e.code || e}`);
+          return this._render();
+        }
+        const t = this._trips.find((x) => x.id === id);
+        if (t) t.label = label || null;
+        if (label && !this._labels.includes(label)) this._labels.push(label);
+        this._render();
+      });
+    });
     root.querySelectorAll("button.deltrip").forEach((b) =>
       b.addEventListener("click", async (ev) => {
         ev.stopPropagation();
@@ -846,6 +950,10 @@ MBLogbookCard.css = `
   button.ratedel { padding: 2px 8px; border-radius: 6px; border: 1px solid var(--divider-color); background: none; color: var(--secondary-text-color); font: inherit; font-size: .85em; cursor: pointer; }
   .tripactions { display: flex; justify-content: flex-end; padding-top: 8px; }
   button.deltrip { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--error-color, #f38ba8); background: none; color: var(--error-color, #f38ba8); font: inherit; cursor: pointer; }
+  .labelbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 8px; }
+  .labelbar .seg button { padding: 4px 10px; font-size: .9em; }
+  button.csv { margin-left: auto; padding: 5px 12px; border-radius: 8px; border: 1px solid var(--divider-color); background: none; color: var(--primary-text-color); font: inherit; font-size: .9em; cursor: pointer; }
+  select.tlabel { padding: 3px 4px; border-radius: 6px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); font: inherit; font-size: .85em; max-width: 9em; }
   .periodbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .stepper { display: inline-flex; align-items: center; gap: 4px; }
   .stepper .range { min-width: 9em; text-align: center; font-weight: 500; }
@@ -881,7 +989,7 @@ MBLogbookCard.css = `
   #mapbox ha-map { height: 100%; display: block; }
 `;
 
-const CARD_VERSION = "0.10.0";
+const CARD_VERSION = "0.11.0";
 
 if (!customElements.get("mb-logbook-card")) {
   customElements.define("mb-logbook-card", MBLogbookCard);
