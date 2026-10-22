@@ -62,6 +62,13 @@ CREATE TABLE IF NOT EXISTS places (
     lon REAL NOT NULL,
     radius_m REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS place_anchors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    place_id INTEGER NOT NULL,
+    lat REAL NOT NULL,
+    lon REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS place_anchors_place ON place_anchors (place_id);
 CREATE TABLE IF NOT EXISTS charge_rates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     location TEXT NOT NULL,
@@ -111,15 +118,32 @@ def rate_at(rates: list[dict[str, Any]], ts: float) -> dict[str, Any] | None:
     return current
 
 
+# A stop this close to a point a place was named from gets that name, even if
+# it's outside the place's circle (the car's GPS can be tens of metres off).
+ANCHOR_RADIUS_M = 75.0
+
+
 def match_place(places: list[dict[str, Any]], lat: float | None, lon: float | None):
-    """Closest named place whose radius covers the point, or None."""
+    """The named place for a point, or None.
+
+    A point matches a place if it is inside the place's circle, or within
+    ANCHOR_RADIUS_M of a stop the place was named from (its anchors), so moving
+    or shrinking the circle never loses the stops it was created for. The
+    closest match wins.
+    """
     if lat is None or lon is None:
         return None
     best = None
     best_d = None
     for p in places:
         d = distance_m(lat, lon, p["lat"], p["lon"])
-        if d <= p["radius_m"] and (best_d is None or d < best_d):
+        hit = d <= p["radius_m"]
+        for a in p.get("anchors") or ():
+            da = distance_m(lat, lon, a[0], a[1])
+            if da <= ANCHOR_RADIUS_M:
+                hit = True
+                d = min(d, da)
+        if hit and (best_d is None or d < best_d):
             best, best_d = p, d
     return best
 
@@ -168,7 +192,22 @@ class LogbookDB:
     # ----- places ------------------------------------------------------------------------
 
     def places(self) -> list[dict[str, Any]]:
-        return [dict(r) for r in self._exec("SELECT * FROM places ORDER BY name COLLATE NOCASE")]
+        places = [dict(r) for r in self._exec("SELECT * FROM places ORDER BY name COLLATE NOCASE")]
+        anchors: dict[int, list[list[float]]] = {}
+        for r in self._exec("SELECT place_id, lat, lon FROM place_anchors"):
+            anchors.setdefault(r["place_id"], []).append([r["lat"], r["lon"]])
+        for p in places:
+            p["anchors"] = anchors.get(p["id"], [])
+        return places
+
+    def add_anchor(self, place_id: int, lat: float, lon: float) -> None:
+        """Link a stop to a place (skipped if an anchor is already within a few metres)."""
+        for r in self._exec("SELECT lat, lon FROM place_anchors WHERE place_id = ?", (place_id,)):
+            if distance_m(lat, lon, r["lat"], r["lon"]) < 5:
+                return
+        self._exec(
+            "INSERT INTO place_anchors (place_id, lat, lon) VALUES (?, ?, ?)", (place_id, lat, lon)
+        )
 
     def save_place(self, place: dict[str, Any]) -> int:
         if place.get("id"):
@@ -235,6 +274,7 @@ class LogbookDB:
         return sorted(out.values(), key=lambda x: -x["charges"])
 
     def delete_place(self, place_id: int) -> None:
+        self._exec("DELETE FROM place_anchors WHERE place_id = ?", (place_id,))
         self._exec("DELETE FROM places WHERE id = ?", (place_id,))
 
     def place_usage(self) -> dict[int, int]:

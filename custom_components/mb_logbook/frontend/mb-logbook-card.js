@@ -268,6 +268,16 @@ class MBLogbookCard extends HTMLElement {
         locationEditable: true,
         radiusEditable: true,
       },
+      // Recorded stops linked to the place: fixed dots that keep the name
+      // however the circle is moved.
+      ...(e.anchors || []).map((a, i) => ({
+        id: `anchor${i}`,
+        location: a,
+        title: "Linked stop (keeps this name)",
+        locationEditable: false,
+        radiusEditable: false,
+        fit: false,
+      })),
     ];
   }
 
@@ -333,14 +343,20 @@ class MBLogbookCard extends HTMLElement {
   }
 
   _showPlaceMap(place) {
-    this._edit = { lat: place.lat, lon: place.lon, radius: Math.round(place.radius_m), title: place.name };
+    this._edit = {
+      lat: place.lat,
+      lon: place.lon,
+      radius: Math.round(place.radius_m),
+      title: place.name,
+      anchors: place.anchors || [],
+    };
     this._drawMap({ edit: true });
   }
 
   /** Map for naming a charge location. */
   _showNamingMap(lat, lon) {
     const r = Number(this.shadowRoot.getElementById("pradius")?.value || 100);
-    this._edit = { lat, lon, radius: r };
+    this._edit = { lat, lon, radius: r, anchors: [[lat, lon]] };
     this._drawMap({ edit: true });
   }
 
@@ -424,7 +440,7 @@ class MBLogbookCard extends HTMLElement {
         <button id=pcancel>Cancel</button>
         <button id=psuggest title="Asks OpenStreetMap for named places near the pin. Only this point is sent.">Suggest names</button>
         <div id=psuggestions class=suggestions></div>
-        <div class=dim>Drag the pin on the map to move the place, or the circle's edge to resize it. The name applies to every trip and charge that starts or ends inside the circle, past and future.</div>
+        <div class=dim>Drag the pin on the map to move the place, or the circle's edge to resize it. This stop (the small dot) always keeps the name, even if the GPS put it outside the circle. The name also applies to every trip and charge inside the circle or near the dot, past and future. Using a name you already have links this stop to that place.</div>
       </div>`;
   }
 
@@ -711,6 +727,9 @@ class MBLogbookCard extends HTMLElement {
           lat: e ? e.lat : Number(save.dataset.lat),
           lon: e ? e.lon : Number(save.dataset.lon),
           radius_m: e ? e.radius : Number(root.getElementById("pradius").value),
+          // The stop's own recorded point stays linked even if the circle is moved off it.
+          anchor_lat: Number(save.dataset.lat),
+          anchor_lon: Number(save.dataset.lon),
         });
       };
       save.addEventListener("click", submit);
@@ -792,7 +811,7 @@ class MBLogbookCard extends HTMLElement {
       const lon = this._naming.end === "start" ? trip.start_lon : trip.end_lon;
       if (lat != null) {
         const r = Number(this.shadowRoot.getElementById("pradius")?.value || 100);
-        this._edit = { lat, lon, radius: r };
+        this._edit = { lat, lon, radius: r, anchors: [[lat, lon]] };
         edit = true;
       }
     }
@@ -856,7 +875,7 @@ MBLogbookCard.css = `
   #mapbox ha-map { height: 100%; display: block; }
 `;
 
-const CARD_VERSION = "0.8.2";
+const CARD_VERSION = "0.9.0";
 
 if (!customElements.get("mb-logbook-card")) {
   customElements.define("mb-logbook-card", MBLogbookCard);

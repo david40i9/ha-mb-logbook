@@ -5,7 +5,7 @@ A Home Assistant integration that keeps a permanent logbook for Mercedes-Benz el
 - **Trips**: start and end time, distance, battery used, kWh and efficiency, start and end place, and the route.
 - **Parked drain**: how much battery each car lost while parked between trips (parks that included a charge are marked, not counted).
 - **Charging sessions**: battery % added, kWh, and, with a home charger energy meter and an electricity price sensor, the metered energy and cost of each home charge credited to the car that was charging.
-- **Named places**: a start or end outside your Home Assistant zones shows as unnamed; name it from the card (with a radius) and every past and future trip or charge there takes that name. Places are shared by all cars and managed in the card's Places tab.
+- **Named places**: a start or end outside your Home Assistant zones shows as unnamed; name it from the card (with a radius) and every past and future trip or charge there takes that name. The stop you named it from stays linked even if you move the circle (the car's GPS can be tens of metres out), and later stops near it get the name too; naming another stop with an existing name links it to that place. Places are shared by all cars and managed in the card's Places tab.
 - **Charging rates**: give any charging place (an HA zone or a named place) a price per kWh, or mark it free, with a start date. Charges without a meter are costed at the rate that applied when they started, so adding a new rate never changes older charges. Metered home charges always use the meter and the live price.
 - **Several cars**: add each car separately; the card switches between them.
 

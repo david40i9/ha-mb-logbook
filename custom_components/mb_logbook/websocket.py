@@ -358,21 +358,37 @@ async def ws_places(hass: HomeAssistant, connection, msg: dict[str, Any]) -> Non
         vol.Required("lat"): vol.All(vol.Coerce(float), vol.Range(min=-90, max=90)),
         vol.Required("lon"): vol.All(vol.Coerce(float), vol.Range(min=-180, max=180)),
         vol.Required("radius_m"): vol.All(vol.Coerce(float), vol.Range(min=20, max=5000)),
+        # The recorded stop the place is being named from: always kept as a match.
+        vol.Optional("anchor_lat"): vol.All(vol.Coerce(float), vol.Range(min=-90, max=90)),
+        vol.Optional("anchor_lon"): vol.All(vol.Coerce(float), vol.Range(min=-180, max=180)),
     }
 )
 @websocket_api.async_response
 async def ws_place_save(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
     db = hass.data[DOMAIN]["db"]
-    place = {
-        "id": msg.get("place_id"),
-        "name": msg["name"],
-        "lat": msg["lat"],
-        "lon": msg["lon"],
-        "radius_m": msg["radius_m"],
-    }
-    place_id = await hass.async_add_executor_job(db.save_place, place)
+    place_id = msg.get("place_id")
+    linked_existing = False
+    if place_id is None:
+        # Naming a stop with a name already in use links it to that place
+        # instead of making a second place with the same name.
+        existing = await hass.async_add_executor_job(db.places)
+        same = next((p for p in existing if p["name"].casefold() == msg["name"].casefold()), None)
+        if same is not None and "anchor_lat" in msg:
+            place_id = same["id"]
+            linked_existing = True
+    if not linked_existing:
+        place = {
+            "id": place_id,
+            "name": msg["name"],
+            "lat": msg["lat"],
+            "lon": msg["lon"],
+            "radius_m": msg["radius_m"],
+        }
+        place_id = await hass.async_add_executor_job(db.save_place, place)
+    if "anchor_lat" in msg and "anchor_lon" in msg:
+        await hass.async_add_executor_job(db.add_anchor, place_id, msg["anchor_lat"], msg["anchor_lon"])
     _refresh_all(hass)
-    connection.send_result(msg["id"], {"id": place_id})
+    connection.send_result(msg["id"], {"id": place_id, "linked_existing": linked_existing})
 
 
 @websocket_api.require_admin
