@@ -13,6 +13,23 @@ Ideas and planned work for MB Logbook. Not in any order yet.
   - Rates change over time: keep each place's rate history (rate + valid from date) and cost every charge at the rate that applied when it happened, so editing a rate never rewrites old costs.
   - Decide how this fits with the live home price sensor (metered home charging) — probably: a place uses either a sensor or a fixed rate history.
 
+## Ideas (from other EV loggers)
+
+Ranked by value for effort, keeping MB Logbook local-only and multi-car.
+
+1. **Export trips and charges to CSV**, filtered by period, car and place — for mileage claims and expenses. *(Tessie and TeslaFi exports; Tessie users use them for tax-time mileage.)*
+2. **Business / personal tagging** on trips (with a default per place, e.g. trips to work), and a mileage summary per tag. *(TeslaFi / Tessie trip classification.)*
+3. **Charging efficiency (gross vs net)**: metered kWh at the charger vs kWh that reached the battery, per session and per month — we already have both numbers for home charges. *(TeslaMate shows net and gross consumption.)*
+4. **Battery health trend**: projected range at 100% (range ÷ battery %), sampled at high charge levels, plotted month by month. *(TeslaMate "projected 100% range"; Tessie battery health.)*
+5. **Efficiency vs outside temperature**: record the outdoor temperature (any HA weather or temperature sensor) at each trip and chart efficiency against it — explains winter drops. *(TeslaMate efficiency dashboards; Tessie.)*
+6. **Drain detail**: idle drain by place and by month (where the car loses most while parked), flagging parks with pre-climate. *(TeslaMate vampire drain dashboard; the "Stats" app shows drain per location.)*
+7. **Off-peak share and "if charged at peak" saving** for home charges, using the live price already recorded per session. *(evcc's cheapest-slot planning, turned into a report.)*
+8. **Events for automations**: fire `mb_logbook_trip_ended` / `mb_logbook_charge_ended` events with the record, so users can send their own notifications or summaries. *(TeslaMate publishes drives and charges over MQTT for automations.)*
+9. **Visited places map / timeline**: all trip ends as a heat map, and a day-by-day timeline. *(TeslaMate "visited" dashboard.)*
+10. **Monthly summary notification** (opt-in): last month's miles, energy, cost and drain.
+11. **Charging curve** for rapid charges: store power samples during a session and plot power vs battery %. *(TeslaMate charge detail.)* Needs more frequent data than the car may send.
+12. *Considered, not planned:* sending live data to A Better Route Planner — useful for some, but it sends location and battery data to an outside service, against MB Logbook's local-only aim. Could only ever be an opt-in, off by default.
+
 ## Done
 
 - [x] Multi-car trips, parked drain, charging sessions (0.1)
@@ -20,3 +37,4 @@ Ideas and planned work for MB Logbook. Not in any order yet.
 - [x] Import history from the recorder (0.3)
 - [x] Charges shown between trips; parks keep their charged flag (0.5)
 - [x] Sidebar page with overview charts and routes map (0.6)
+- [x] Period arrows, delete trip, charging rates with history (0.7)

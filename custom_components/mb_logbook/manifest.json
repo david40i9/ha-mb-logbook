@@ -10,5 +10,5 @@
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/david40i9/ha-mb-logbook/issues",
   "requirements": [],
-  "version": "0.6.0"
+  "version": "0.7.0"
 }
