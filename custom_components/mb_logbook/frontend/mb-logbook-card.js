@@ -268,17 +268,23 @@ class MBLogbookCard extends HTMLElement {
         locationEditable: true,
         radiusEditable: true,
       },
-      // Recorded stops linked to the place: fixed dots that keep the name
-      // however the circle is moved.
-      ...(e.anchors || []).map((a, i) => ({
-        id: `anchor${i}`,
-        location: a,
-        title: "Linked stop (keeps this name)",
-        locationEditable: false,
-        radiusEditable: false,
-        fit: false,
-      })),
     ];
+  }
+
+  /**
+   * Linked stops as map dots. Drawn as a path (part of the map image), not as
+   * markers: a marker sitting on the circle's centre pin would take the grab
+   * and stop the pin being dragged.
+   */
+  _anchorPaths() {
+    const now = new Date();
+    return (this._edit?.anchors || []).map((a) => ({
+      color: "var(--warning-color, #f9e2af)",
+      gradualOpacity: 0,
+      fullDatetime: false,
+      name: "Linked stop (keeps this name)",
+      points: [0, 1].map(() => ({ timestamp: now, point: [a[0], a[1]], latitude: a[0], longitude: a[1] })),
+    }));
   }
 
   /**
@@ -296,7 +302,7 @@ class MBLogbookCard extends HTMLElement {
     map.hass = this._hass;
     map.autoFit = false; // we position it ourselves once it has loaded
     map.fitZones = false;
-    map.paths = paths;
+    map.paths = edit ? [...paths, ...this._anchorPaths()] : paths;
     map.editableLocations = edit ? this._editable() : [];
     map.addEventListener("editable-location-moved", (ev) => {
       this._edit.lat = ev.detail.location[0];
@@ -875,7 +881,7 @@ MBLogbookCard.css = `
   #mapbox ha-map { height: 100%; display: block; }
 `;
 
-const CARD_VERSION = "0.9.0";
+const CARD_VERSION = "0.9.1";
 
 if (!customElements.get("mb-logbook-card")) {
   customElements.define("mb-logbook-card", MBLogbookCard);
