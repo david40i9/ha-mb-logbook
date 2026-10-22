@@ -14,6 +14,8 @@ class MBLogbookPanel extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
     this._view = "overview";
+    this._mPeriod = "month"; // mileage-by-label period
+    this._mOffset = 0;
   }
 
   set hass(hass) {
@@ -218,12 +220,110 @@ class MBLogbookPanel extends HTMLElement {
 
     box.innerHTML = `
       <div class=section><h2>${this._monthName(cur.month, true)} so far</h2><div class=tiles>${tiles}</div></div>
+      <div class=section id=mileage></div>
       <div class=grid>${charts}</div>
       <div class=grid2>
         <div class=section><h2>Routes this month <span class=dim>(${routes.length} trips)</span></h2><div id=mapbox></div></div>
         <div class=section><h2>Most visited <span class=dim>(last 12 months)</span></h2>${top}</div>
       </div>`;
+    this._loadMileage();
     this._drawRoutes(routes);
+  }
+
+  /** Calendar period `offset` periods back: {start, end (seconds), label}. Same as the card. */
+  _range(period, offset) {
+    const loc = this._hass?.locale?.language;
+    const now = new Date();
+    let start;
+    let end;
+    let label;
+    if (period === "week") {
+      const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7));
+      start = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() - 7 * offset);
+      end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 7);
+      const last = new Date(end.getTime() - 86400000);
+      const f = (d, o) => d.toLocaleDateString(loc, o);
+      label =
+        start.getMonth() === last.getMonth()
+          ? `${start.getDate()}–${f(last, { day: "numeric", month: "short", year: "numeric" })}`
+          : `${f(start, { day: "numeric", month: "short" })} – ${f(last, { day: "numeric", month: "short", year: "numeric" })}`;
+    } else if (period === "month") {
+      start = new Date(now.getFullYear(), now.getMonth() - offset, 1);
+      end = new Date(start.getFullYear(), start.getMonth() + 1, 1);
+      label = start.toLocaleDateString(loc, { month: "long", year: "numeric" });
+    } else if (period === "quarter") {
+      start = new Date(now.getFullYear(), now.getMonth() - 2 - 3 * offset, 1);
+      end = new Date(start.getFullYear(), start.getMonth() + 3, 1);
+      const last = new Date(end.getFullYear(), end.getMonth() - 1, 1);
+      label = `${start.toLocaleDateString(loc, { month: "short" })} – ${last.toLocaleDateString(loc, { month: "short", year: "numeric" })}`;
+    } else {
+      start = new Date(now.getFullYear() - offset, 0, 1);
+      end = new Date(start.getFullYear() + 1, 0, 1);
+      label = String(start.getFullYear());
+    }
+    return { start: start.getTime() / 1000, end: end.getTime() / 1000, label };
+  }
+
+  /** Mileage by trip label for a chosen period (Business first), for mileage claims. */
+  async _loadMileage() {
+    const box = this.shadowRoot.getElementById("mileage");
+    if (!box) return;
+    const car = this._car;
+    const { start, end, label } = this._range(this._mPeriod, this._mOffset);
+    const periods = [["week", "Week"], ["month", "Month"], ["quarter", "3 months"], ["year", "Year"]];
+    const head = `<div class=mhead><h2>Mileage by label</h2>
+        <div class=seg>${periods.map(([v, l]) => `<button data-mp="${v}" class="${v === this._mPeriod ? "on" : ""}">${l}</button>`).join("")}</div>
+        <div class=stepper><button class=step data-ms="1" title="Previous">‹</button><span class=range>${escp(label)}</span><button class=step data-ms="-1" title="Next" ${this._mOffset === 0 ? "disabled" : ""}>›</button></div></div>`;
+    box.innerHTML = `${head}<div class=dim>Loading…</div>`;
+    this._wireMileage(box);
+    let trips;
+    try {
+      trips = await this._hass.callWS({ type: "mb_logbook/trips", entry_id: car.entry_id, start, end });
+    } catch (e) {
+      box.innerHTML = `${head}<div class=dim>Couldn't load trips.</div>`;
+      this._wireMileage(box);
+      return;
+    }
+    if (this._car !== car) return;
+    const groups = new Map();
+    for (const t of trips) {
+      const k = t.label || "";
+      const g = groups.get(k) || { trips: 0, km: 0, auto: 0 };
+      g.trips += 1;
+      g.km += t.distance_km;
+      if (t.label_auto) g.auto += 1;
+      groups.set(k, g);
+    }
+    const order = [...groups.keys()].sort((a, b) => (a === "Business" ? -1 : b === "Business" ? 1 : !a ? 1 : !b ? -1 : a.localeCompare(b)));
+    if (!groups.has("Business")) order.unshift("Business");
+    const totalKm = trips.reduce((s, t) => s + t.distance_km, 0);
+    const tiles = order
+      .map((k) => {
+        const g = groups.get(k) || { trips: 0, km: 0, auto: 0 };
+        const name = k || "Unlabelled";
+        return `<div class="tile ${k === "Business" ? "biz" : ""}"><div class=k>${escp(name)}</div><div class=v>${this._d(g.km, 1)} ${this._du}</div>
+          <div class=delta>${g.trips} trip${g.trips === 1 ? "" : "s"}${g.auto ? ` · ${g.auto} from place defaults` : ""}</div></div>`;
+      })
+      .join("");
+    box.innerHTML = `${head}<div class=tiles>${tiles}<div class=tile><div class=k>All trips</div><div class=v>${this._d(totalKm, 1)} ${this._du}</div><div class=delta>${trips.length} trips</div></div></div>
+      <div class=dim style="margin-top:8px">Label trips (or give places a default label) in the Logbook tab; export them as CSV from there.</div>`;
+    this._wireMileage(box);
+  }
+
+  _wireMileage(box) {
+    box.querySelectorAll("button[data-mp]").forEach((b) =>
+      b.addEventListener("click", () => {
+        this._mPeriod = b.dataset.mp;
+        this._mOffset = 0;
+        this._loadMileage();
+      })
+    );
+    box.querySelectorAll("button[data-ms]").forEach((b) =>
+      b.addEventListener("click", () => {
+        this._mOffset = Math.max(0, this._mOffset + Number(b.dataset.ms));
+        this._loadMileage();
+      })
+    );
   }
 
   /** Grouped bar chart as inline SVG. series: [{name?, values[], colour}] */
@@ -325,6 +425,13 @@ MBLogbookPanel.css = `
     border: 1px solid var(--ha-card-border-color, var(--divider-color)); }
   h2 { font-size: 1.05em; font-weight: 600; margin: 0 0 10px; }
   .dim { color: var(--secondary-text-color); font-weight: normal; font-size: .9em; }
+  .mhead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+  .mhead h2 { margin: 0; flex: 1; }
+  .stepper { display: inline-flex; align-items: center; gap: 4px; }
+  .stepper .range { min-width: 9em; text-align: center; font-weight: 500; }
+  button.step { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--divider-color); background: none; color: var(--primary-text-color); font-size: 1.2em; line-height: 1; cursor: pointer; }
+  button.step:disabled { opacity: .35; cursor: default; }
+  .tile.biz { outline: 2px solid var(--primary-color); }
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
   .tile { background: var(--secondary-background-color); border-radius: 10px; padding: 10px 12px; }
   .k { font-size: .8em; color: var(--secondary-text-color); }

@@ -49,7 +49,7 @@ When a car is added, MB Logbook rebuilds its earlier trips and charges from Home
 
 MB Logbook adds an **MB Logbook** page to the sidebar:
 
-- **Overview**: this month's trips, distance, energy, efficiency, charging and idle drain against last month; 12-month charts of distance, energy used vs charged, charging cost and efficiency; a map of this month's routes; your most-visited places.
+- **Overview**: mileage by trip label (Business first) for any week, month, 3 months or year, with arrows to step back; this month's trips, distance, energy, efficiency, charging and idle drain against last month; 12-month charts of distance, energy used vs charged, charging cost and efficiency; a map of this month's routes; your most-visited places.
 - **Logbook**: the full logbook (trips, charging, places) for the selected car.
 
 ## Card

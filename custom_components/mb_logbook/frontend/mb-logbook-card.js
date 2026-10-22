@@ -225,12 +225,9 @@ class MBLogbookCard extends HTMLElement {
       .map((loc, i) => {
         const hist = r.rates.filter((x) => x.location === loc.location).sort((a, b) => a.valid_from - b.valid_from);
         const current = [...hist].reverse().find((x) => x.valid_from <= now);
-        const allMetered = loc.charges > 0 && loc.metered === loc.charges;
         const cur = current
           ? `${this._rateText(current.rate)} <span class=dim>since ${this._date(current.valid_from)}</span>`
-          : allMetered
-            ? `<span class=dim>metered at the live price</span>`
-            : `<span class=dim>no rate</span>`;
+          : `<span class=dim>–</span>`;
         const open = this._openRate === i;
         const histRows = hist.length
           ? hist
@@ -1043,7 +1040,7 @@ MBLogbookCard.css = `
   #mapbox ha-map { height: 100%; display: block; }
 `;
 
-const CARD_VERSION = "0.12.1";
+const CARD_VERSION = "0.13.0";
 
 if (!customElements.get("mb-logbook-card")) {
   customElements.define("mb-logbook-card", MBLogbookCard);
