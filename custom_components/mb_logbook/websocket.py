@@ -79,18 +79,27 @@ LOOKUP_TIMEOUT = aiohttp.ClientTimeout(total=10)
 
 
 async def _photon(session, lat: float, lon: float, radius: float) -> list[dict[str, Any]]:
-    """Photon (OpenStreetMap data, by Komoot): nearest named features."""
-    params = {"lat": f"{lat:.6f}", "lon": f"{lon:.6f}", "limit": "20", "radius": f"{radius / 1000:.2f}", "lang": "en"}
-    async with session.get(PHOTON_URL, params=params, headers={"User-Agent": USER_AGENT}, timeout=LOOKUP_TIMEOUT) as resp:
-        if resp.status != 200:
-            raise aiohttp.ClientError(f"Photon said {resp.status}")
-        data = await resp.json(content_type=None)
+    """Photon (OpenStreetMap data, by Komoot): businesses near the point, plus a
+    plain lookup for the street name as a fallback suggestion."""
+    base = [("lat", f"{lat:.6f}"), ("lon", f"{lon:.6f}"), ("radius", f"{radius / 1000:.2f}"), ("lang", "en")]
+    pois = base + [("limit", "20")] + [("osm_tag", k) for k in POI_KEYS.split("|")]
+    plain = base + [("limit", "5")]
+    features = []
+    for params in (pois, plain):
+        async with session.get(
+            PHOTON_URL, params=params, headers={"User-Agent": USER_AGENT}, timeout=LOOKUP_TIMEOUT
+        ) as resp:
+            if resp.status != 200:
+                raise aiohttp.ClientError(f"Photon said {resp.status}")
+            features += (await resp.json(content_type=None)).get("features", [])
     out = []
-    for f in data.get("features", []):
+    for f in features:
         props = f.get("properties") or {}
         coords = (f.get("geometry") or {}).get("coordinates") or []
         if not props.get("name") or len(coords) < 2:
             continue
+        if props.get("osm_value") == "postcode" or props.get("type") == "postcode":
+            continue  # postcodes aren't useful place names
         out.append(
             {"name": props["name"], "key": props.get("osm_key", ""), "kind": props.get("osm_value", ""),
              "lat": coords[1], "lon": coords[0]}
@@ -157,8 +166,13 @@ async def ws_suggest_names(hass: HomeAssistant, connection, msg: dict[str, Any])
         return
 
     poi_keys = set(POI_KEYS.split("|"))
+    # Street furniture is named sometimes but never what you'd call a stop.
+    skip = {"atm", "bench", "waste_basket", "bicycle_parking", "post_box", "telephone",
+            "vending_machine", "recycling", "parcel_locker", "drinking_water"}
     best: dict[str, dict[str, Any]] = {}
     for f in found:
+        if f["kind"] in skip:
+            continue
         dist = distance_m(lat, lon, f["lat"], f["lon"])
         if dist > radius * 1.5:
             continue
@@ -166,7 +180,9 @@ async def ws_suggest_names(hass: HomeAssistant, connection, msg: dict[str, Any])
         item = {"name": f["name"], "kind": str(f["kind"]).replace("_", " "), "distance_m": round(dist), "rank": rank}
         if f["name"] not in best or (rank, dist) < (best[f["name"]]["rank"], best[f["name"]]["distance_m"]):
             best[f["name"]] = item
-    suggestions = sorted(best.values(), key=lambda s: (s["rank"], s["distance_m"]))[:10]
+    ordered = sorted(best.values(), key=lambda s: (s["rank"], s["distance_m"]))
+    # Up to ten businesses, then at most two street/area names as a fallback.
+    suggestions = [s for s in ordered if s["rank"] == 0][:10] + [s for s in ordered if s["rank"] == 1][:2]
     connection.send_result(msg["id"], suggestions)
 
 
