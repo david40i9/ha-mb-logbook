@@ -137,7 +137,7 @@ class MBLogbookPanel extends HTMLElement {
       return;
     }
     const card = document.createElement("mb-logbook-card");
-    card.setConfig({ entry_id: this._car.entry_id, days: 30, title: " " });
+    card.setConfig({ entry_id: this._car.entry_id, period: "month", title: " " });
     card.hass = this._hass;
     box.innerHTML = "";
     box.appendChild(card);

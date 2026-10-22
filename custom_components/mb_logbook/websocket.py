@@ -285,4 +285,5 @@ async def ws_charges(hass: HomeAssistant, connection, msg: dict[str, Any]) -> No
 async def ws_delete_trip(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
     db = hass.data[DOMAIN]["db"]
     await hass.async_add_executor_job(db.delete_trip, msg["trip_id"])
+    _refresh_all(hass)  # month totals and last-trip sensors
     connection.send_result(msg["id"], {"deleted": msg["trip_id"]})

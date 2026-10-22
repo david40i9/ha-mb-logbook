@@ -3,20 +3,25 @@
  * <ha-map>, so it uses the same map tiles as HA's map card and nothing else. */
 
 const KM_PER_MI = 1.609344;
+// Calendar periods; the arrows step back and forward by one period.
 const PERIODS = [
-  ["7", "7 days"],
-  ["30", "30 days"],
-  ["90", "90 days"],
-  ["365", "1 year"],
+  ["week", "Week"],
+  ["month", "Month"],
+  ["quarter", "3 months"],
+  ["year", "Year"],
 ];
+// Older configs used `days:`.
+const DAYS_TO_PERIOD = { 7: "week", 30: "month", 90: "quarter", 365: "year" };
 
 const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
 class MBLogbookCard extends HTMLElement {
   setConfig(config) {
-    this._config = { days: 30, ...config };
-    this._days = String(this._config.days);
+    this._config = { ...config };
+    this._period =
+      PERIODS.find(([p]) => p === this._config.period)?.[0] || DAYS_TO_PERIOD[this._config.days] || "month";
+    this._offset = 0; // 0 = the current period, 1 = the one before, ...
     this._tab = "trips";
     this._open = null;
     this._cars = null;
@@ -42,7 +47,42 @@ class MBLogbookCard extends HTMLElement {
   }
 
   static getStubConfig() {
-    return { days: 30 };
+    return { period: "month" };
+  }
+
+  /** Start/end (seconds) and a label for the chosen period, `offset` periods back. */
+  _range() {
+    const loc = this._hass?.locale?.language;
+    const now = new Date();
+    const o = this._offset;
+    let start;
+    let end;
+    let label;
+    if (this._period === "week") {
+      const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7));
+      start = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() - 7 * o);
+      end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 7);
+      const last = new Date(end.getTime() - 86400000);
+      const f = (d, opts) => d.toLocaleDateString(loc, opts);
+      label =
+        start.getMonth() === last.getMonth()
+          ? `${start.getDate()}–${f(last, { day: "numeric", month: "short", year: "numeric" })}`
+          : `${f(start, { day: "numeric", month: "short" })} – ${f(last, { day: "numeric", month: "short", year: "numeric" })}`;
+    } else if (this._period === "month") {
+      start = new Date(now.getFullYear(), now.getMonth() - o, 1);
+      end = new Date(start.getFullYear(), start.getMonth() + 1, 1);
+      label = start.toLocaleDateString(loc, { month: "long", year: "numeric" });
+    } else if (this._period === "quarter") {
+      start = new Date(now.getFullYear(), now.getMonth() - 2 - 3 * o, 1);
+      end = new Date(start.getFullYear(), start.getMonth() + 3, 1);
+      const last = new Date(end.getFullYear(), end.getMonth() - 1, 1);
+      label = `${start.toLocaleDateString(loc, { month: "short" })} – ${last.toLocaleDateString(loc, { month: "short", year: "numeric" })}`;
+    } else {
+      start = new Date(now.getFullYear() - o, 0, 1);
+      end = new Date(start.getFullYear() + 1, 0, 1);
+      label = String(start.getFullYear());
+    }
+    return { start: start.getTime() / 1000, end: end.getTime() / 1000, label };
   }
 
   async _init() {
@@ -65,8 +105,7 @@ class MBLogbookCard extends HTMLElement {
       this._render();
       return;
     }
-    const end = Date.now() / 1000 + 86400;
-    const start = Date.now() / 1000 - Number(this._days) * 86400;
+    const { start, end } = this._range();
     const args = { entry_id: this._car.entry_id, start, end };
     const [trips, charges, places] = await Promise.all([
       this._hass.callWS({ type: "mb_logbook/trips", ...args }),
@@ -367,7 +406,7 @@ class MBLogbookCard extends HTMLElement {
   }
 
   _tripRows() {
-    if (!this._trips.length) return `<tr><td colspan=8 class=empty>No trips in this period yet.</td></tr>`;
+    if (!this._trips.length) return `<tr><td colspan=8 class=empty>No trips in this period.</td></tr>`;
     // Newest first, with each charge placed between the trips it fell between.
     const items = [
       ...this._trips.map((x) => ({ ts: x.start_ts, trip: x })),
@@ -400,13 +439,13 @@ class MBLogbookCard extends HTMLElement {
             <td class=n>${this._eff(x.distance_km, kwh)}</td>
             <td class=n>${park}</td>
             <td class=n>${x.point_count > 1 ? "🗺" : ""}</td>
-          </tr>${open ? `<tr class=maprow><td colspan=8>${form}<div id=mapbox></div></td></tr>` : ""}`;
+          </tr>${open ? `<tr class=maprow><td colspan=8>${form}<div id=mapbox></div>${this._hass.user?.is_admin && !naming ? `<div class=tripactions><button class=deltrip data-id="${x.id}">Delete this trip</button></div>` : ""}</td></tr>` : ""}`;
       })
       .join("");
   }
 
   _chargeRows() {
-    if (!this._charges.length) return `<tr><td colspan=7 class=empty>No charging sessions in this period yet.</td></tr>`;
+    if (!this._charges.length) return `<tr><td colspan=7 class=empty>No charging sessions in this period.</td></tr>`;
     return this._charges
       .map((c) => {
         const kwh = c.kwh_meter ?? c.kwh_car;
@@ -445,7 +484,8 @@ class MBLogbookCard extends HTMLElement {
     const periods =
       this._tab === "places"
         ? "<div></div>"
-        : `<div class=seg>${PERIODS.map(([v, l]) => `<button data-days="${v}" class="${v === this._days ? "on" : ""}">${l}</button>`).join("")}</div>`;
+        : `<div class=periodbar><div class=seg>${PERIODS.map(([v, l]) => `<button data-period="${v}" class="${v === this._period ? "on" : ""}">${l}</button>`).join("")}</div>
+           <div class=stepper><button class=step data-step="1" title="Previous">‹</button><span class=range>${esc(this._range().label)}</span><button class=step data-step="-1" title="Next" ${this._offset === 0 ? "disabled" : ""}>›</button></div></div>`;
     const tabs = `<div class=seg>${[["trips", "Trips"], ["charges", "Charging"], ["places", "Places"]]
       .map(([v, l]) => `<button data-tab="${v}" class="${v === this._tab ? "on" : ""}">${l}</button>`)
       .join("")}</div>`;
@@ -469,9 +509,16 @@ class MBLogbookCard extends HTMLElement {
         this._load();
       })
     );
-    root.querySelectorAll("button[data-days]").forEach((b) =>
+    root.querySelectorAll("button[data-period]").forEach((b) =>
       b.addEventListener("click", () => {
-        this._days = b.dataset.days;
+        this._period = b.dataset.period;
+        this._offset = 0;
+        this._load();
+      })
+    );
+    root.querySelectorAll("button[data-step]").forEach((b) =>
+      b.addEventListener("click", () => {
+        this._offset = Math.max(0, this._offset + Number(b.dataset.step));
         this._load();
       })
     );
@@ -491,6 +538,21 @@ class MBLogbookCard extends HTMLElement {
         this._naming = null;
         this._render();
         if (this._open != null) this._showMap(this._open);
+      })
+    );
+    root.querySelectorAll("button.deltrip").forEach((b) =>
+      b.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        const t = this._trips.find((x) => x.id === Number(b.dataset.id));
+        const what = t ? `${this._when(t.start_ts)}, ${this._dist(t.distance_km)}` : "this trip";
+        if (!confirm(`Delete the trip on ${what}? This can't be undone.`)) return;
+        try {
+          await this._hass.callWS({ type: "mb_logbook/delete_trip", trip_id: Number(b.dataset.id) });
+        } catch (e) {
+          alert(`Couldn't delete the trip: ${e.message || e.code || e}`);
+          return;
+        }
+        await this._load();
       })
     );
     root.querySelectorAll("button.nameit").forEach((b) =>
@@ -622,6 +684,13 @@ MBLogbookCard.css = `
   .seg { display: inline-flex; border: 1px solid var(--divider-color); border-radius: 10px; overflow: hidden; }
   .seg button { background: none; border: 0; color: var(--secondary-text-color); padding: 6px 12px; font: inherit; cursor: pointer; }
   .seg button.on { background: var(--primary-color); color: var(--text-primary-color, #fff); }
+  .tripactions { display: flex; justify-content: flex-end; padding-top: 8px; }
+  button.deltrip { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--error-color, #f38ba8); background: none; color: var(--error-color, #f38ba8); font: inherit; cursor: pointer; }
+  .periodbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .stepper { display: inline-flex; align-items: center; gap: 4px; }
+  .stepper .range { min-width: 9em; text-align: center; font-weight: 500; }
+  button.step { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--divider-color); background: none; color: var(--primary-text-color); font-size: 1.2em; line-height: 1; cursor: pointer; }
+  button.step:disabled { opacity: .35; cursor: default; }
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin-bottom: 10px; }
   .tile { background: var(--secondary-background-color); border-radius: 10px; padding: 8px 10px; }
   .k { font-size: .78em; color: var(--secondary-text-color); }
