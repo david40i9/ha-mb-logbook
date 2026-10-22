@@ -44,10 +44,15 @@ class MBLogbookPanel extends HTMLElement {
         /* the card tab will say so */
       }
     }
-    try {
-      this._cars = await this._hass.callWS({ type: "mb_logbook/cars" });
-    } catch (e) {
-      this._cars = [];
+    // Right after a restart the integration may not be ready yet: retry a few times.
+    this._cars = [];
+    for (let i = 0; i < 6 && !this._cars.length; i++) {
+      try {
+        this._cars = await this._hass.callWS({ type: "mb_logbook/cars" });
+      } catch (e) {
+        this._cars = [];
+      }
+      if (!this._cars.length) await new Promise((r) => setTimeout(r, 2000));
     }
     this._car = this._cars[0] || null;
     this._render();
@@ -132,6 +137,7 @@ class MBLogbookPanel extends HTMLElement {
 
   _showLogbook() {
     const box = this.shadowRoot.getElementById("content");
+    if (!this._car) return; // the "no cars" message is already shown
     if (!customElements.get("mb-logbook-card")) {
       box.innerHTML = `<div class=empty>The logbook card didn't load. Refresh the page.</div>`;
       return;

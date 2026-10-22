@@ -70,9 +70,57 @@ def _refresh_all(hass: HomeAssistant) -> None:
         async_dispatcher_send(hass, SIGNAL_UPDATED.format(entry.runtime_data.car_id))
 
 
+PHOTON_URL = "https://photon.komoot.io/reverse"
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 # Things worth naming a stop after: shops, cafés, car parks, chargers, stations...
-POI_KEYS = "shop|amenity|tourism|leisure|office|craft|healthcare|railway|public_transport|club|sport"
+POI_KEYS = "shop|amenity|tourism|leisure|office|craft|healthcare|railway|public_transport|club|sport|aeroway"
+USER_AGENT = f"MB-Logbook/{VERSION} (Home Assistant integration)"
+LOOKUP_TIMEOUT = aiohttp.ClientTimeout(total=10)
+
+
+async def _photon(session, lat: float, lon: float, radius: float) -> list[dict[str, Any]]:
+    """Photon (OpenStreetMap data, by Komoot): nearest named features."""
+    params = {"lat": f"{lat:.6f}", "lon": f"{lon:.6f}", "limit": "20", "radius": f"{radius / 1000:.2f}", "lang": "en"}
+    async with session.get(PHOTON_URL, params=params, headers={"User-Agent": USER_AGENT}, timeout=LOOKUP_TIMEOUT) as resp:
+        if resp.status != 200:
+            raise aiohttp.ClientError(f"Photon said {resp.status}")
+        data = await resp.json(content_type=None)
+    out = []
+    for f in data.get("features", []):
+        props = f.get("properties") or {}
+        coords = (f.get("geometry") or {}).get("coordinates") or []
+        if not props.get("name") or len(coords) < 2:
+            continue
+        out.append(
+            {"name": props["name"], "key": props.get("osm_key", ""), "kind": props.get("osm_value", ""),
+             "lat": coords[1], "lon": coords[0]}
+        )
+    return out
+
+
+async def _overpass(session, lat: float, lon: float, radius: float) -> list[dict[str, Any]]:
+    """Overpass API fallback: named POIs within the radius."""
+    query = (
+        f"[out:json][timeout:10];"
+        f'nwr(around:{radius:.0f},{lat:.6f},{lon:.6f})[name][~"^({POI_KEYS})$"~"."];'
+        f"out center tags 60;"
+    )
+    async with session.post(
+        OVERPASS_URL, data={"data": query}, headers={"User-Agent": USER_AGENT}, timeout=LOOKUP_TIMEOUT
+    ) as resp:
+        if resp.status != 200:
+            raise aiohttp.ClientError(f"Overpass said {resp.status}")
+        data = await resp.json(content_type=None)
+    out = []
+    for el in data.get("elements", []):
+        tags = el.get("tags") or {}
+        plat = el.get("lat", (el.get("center") or {}).get("lat"))
+        plon = el.get("lon", (el.get("center") or {}).get("lon"))
+        if not tags.get("name") or plat is None or plon is None:
+            continue
+        key = next((k for k in POI_KEYS.split("|") if k in tags), "")
+        out.append({"name": tags["name"], "key": key, "kind": tags.get(key, ""), "lat": plat, "lon": plon})
+    return out
 
 
 @websocket_api.websocket_command(
@@ -85,53 +133,40 @@ POI_KEYS = "shop|amenity|tourism|leisure|office|craft|healthcare|railway|public_
 )
 @websocket_api.async_response
 async def ws_suggest_names(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
-    """Named businesses/places near a point, from OpenStreetMap (Overpass API).
+    """Named businesses/places near a point, from OpenStreetMap data.
 
     Only runs when the user asks for suggestions, and sends nothing but this
-    one point; no car, trip or account data.
+    one point; no car, trip or account data. Photon first (fast), Overpass if
+    Photon fails. Businesses come first, then nearby street names.
     """
     lat, lon = msg["lat"], msg["lon"]
     radius = max(80.0, msg["radius_m"])
-    query = (
-        f"[out:json][timeout:10];"
-        f'nwr(around:{radius:.0f},{lat:.6f},{lon:.6f})[name][~"^({POI_KEYS})$"~"."];'
-        f"out center tags 60;"
-    )
     session = async_get_clientsession(hass)
-    try:
-        async with session.post(
-            OVERPASS_URL,
-            data={"data": query},
-            headers={"User-Agent": f"MB-Logbook/{VERSION} (Home Assistant integration)"},
-            timeout=aiohttp.ClientTimeout(total=15),
-        ) as resp:
-            if resp.status != 200:
-                connection.send_error(msg["id"], "lookup_failed", f"OpenStreetMap said {resp.status}")
-                return
-            data = await resp.json(content_type=None)
-    except (aiohttp.ClientError, TimeoutError) as err:
-        connection.send_error(msg["id"], "lookup_failed", f"Couldn't reach OpenStreetMap: {err}")
+    found: list[dict[str, Any]] | None = None
+    errors = []
+    for source in (_photon, _overpass):
+        try:
+            found = await source(session, lat, lon, radius)
+            break
+        except (aiohttp.ClientError, TimeoutError, ValueError) as err:
+            errors.append(str(err) or type(err).__name__)
+    if found is None:
+        connection.send_error(
+            msg["id"], "lookup_failed", "OpenStreetMap lookups are busy, try again shortly (" + "; ".join(errors) + ")"
+        )
         return
 
-    seen: dict[str, dict[str, Any]] = {}
-    for el in data.get("elements", []):
-        tags = el.get("tags") or {}
-        name = tags.get("name")
-        plat = el.get("lat", (el.get("center") or {}).get("lat"))
-        plon = el.get("lon", (el.get("center") or {}).get("lon"))
-        if not name or plat is None or plon is None:
+    poi_keys = set(POI_KEYS.split("|"))
+    best: dict[str, dict[str, Any]] = {}
+    for f in found:
+        dist = distance_m(lat, lon, f["lat"], f["lon"])
+        if dist > radius * 1.5:
             continue
-        kind = next((tags[k] for k in POI_KEYS.split("|") if k in tags), "")
-        dist = distance_m(lat, lon, plat, plon)
-        if name not in seen or dist < seen[name]["distance_m"]:
-            seen[name] = {
-                "name": name,
-                "kind": str(kind).replace("_", " "),
-                "distance_m": round(dist),
-                "lat": plat,
-                "lon": plon,
-            }
-    suggestions = sorted(seen.values(), key=lambda s: s["distance_m"])[:10]
+        rank = 0 if f["key"] in poi_keys else 1  # businesses before streets/areas
+        item = {"name": f["name"], "kind": str(f["kind"]).replace("_", " "), "distance_m": round(dist), "rank": rank}
+        if f["name"] not in best or (rank, dist) < (best[f["name"]]["rank"], best[f["name"]]["distance_m"]):
+            best[f["name"]] = item
+    suggestions = sorted(best.values(), key=lambda s: (s["rank"], s["distance_m"]))[:10]
     connection.send_result(msg["id"], suggestions)
 
 
