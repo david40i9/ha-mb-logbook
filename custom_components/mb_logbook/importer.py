@@ -40,7 +40,7 @@ from .const import (
     UNKNOWN_STATES,
 )
 from . import rules
-from .logger import CarLogger, _num, _to_km
+from .logger import MOVE_TRIGGER_M, CarLogger, _moved_m, _num, _to_km
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -96,13 +96,13 @@ class _Replay:
         return self.lg._place(lat, lon)  # HA zones as they are now
 
     # ----- trips -----
-    def start_trip(self, ts: float) -> None:
+    def start_trip(self, ts: float, odo_start_km: float | None = None) -> None:
         pos = self._pos()
         lat, lon = (pos[0], pos[1]) if pos else (None, None)
         soc = self._val(CONF_SOC)
         self.trip = {
             "start_ts": ts,
-            "odo_start_km": self._km(CONF_ODOMETER),
+            "odo_start_km": odo_start_km if odo_start_km is not None else self._km(CONF_ODOMETER),
             "counter_last": self._km(CONF_TRIP_DISTANCE),
             "counter_km": 0.0,
             "soc_start": soc,
@@ -184,6 +184,8 @@ class _Replay:
             "max_power_kw": 0.0,
             "last_ts": ts,
         }
+        if self.conf.get(CONF_CHARGE_POWER):
+            rules.add_power_sample(self.charge, ts, self._val(CONF_CHARGE_POWER) or 0.0, self._val(CONF_PRICE))
         self.park["charged"] = True
 
     def end_charge(self) -> None:
@@ -199,6 +201,8 @@ class _Replay:
         meter = c["kwh_meter"]
         if meter <= 0 and (kwh_car is None or kwh_car <= 0):
             return
+        rules.add_power_sample(c, c.get("off_ts", c["last_ts"]), 0.0, None)
+        cost, basis = rules.charge_cost(c, bool(self.conf.get(CONF_PRICE)))
         self.charges.append(
             {
                 "car": self.lg.car_id,
@@ -208,7 +212,8 @@ class _Replay:
                 "soc_end": soc_end,
                 "kwh_car": kwh_car,
                 "kwh_meter": round(meter, 3) if meter > 0 else None,
-                "cost": round(c["cost"], 4) if meter > 0 else None,
+                "cost": cost,
+                "cost_basis": basis,
                 "max_power_kw": c["max_power_kw"] or None,
                 "place": c["place"],
                 "at_home": c["at_home"],
@@ -228,7 +233,22 @@ class _Replay:
         old = self.cur.get(eid)
         self.cur[eid] = st
         c = self.conf
-        if eid == c[CONF_IGNITION]:
+        if not c.get(CONF_IGNITION):
+            # No ignition sensor: the same movement rules as the live logger.
+            moved, odo_before = False, None
+            if eid == c[CONF_TRACKER] and _moved_m(old, st) >= MOVE_TRIGGER_M:
+                moved = True
+            elif eid == c.get(CONF_TRIP_DISTANCE) and (_num(st) or 0) > (_num(old) or 0):
+                moved = True
+            elif eid == c[CONF_ODOMETER]:
+                b, a = _num(old), _num(st)
+                if b is not None and a is not None and a > b:
+                    moved, odo_before = True, _to_km(b, old)
+            if moved:
+                if self.trip is None:
+                    self.start_trip(ts, odo_before)
+                self.trip["off_ts"] = ts
+        if eid == c.get(CONF_IGNITION):
             if st.state in UNKNOWN_STATES:
                 return
             if st.state not in IGNITION_OFF:
@@ -268,6 +288,10 @@ class _Replay:
                     self.charge.pop("off_ts", None)
             elif self.charge is not None and "off_ts" not in self.charge:
                 self.charge["off_ts"] = ts
+                rules.add_power_sample(self.charge, ts, 0.0, self._val(CONF_PRICE))
+        elif eid == c.get(CONF_PRICE):
+            if self.charge is not None and "off_ts" not in self.charge and self.charge.get("pw_last"):
+                rules.add_power_sample(self.charge, ts, None, _num(st))
         elif eid == c.get(CONF_CHARGER_ENERGY):
             if self.charge is None or not self.charge["at_home"] or "off_ts" in self.charge:
                 return
@@ -286,6 +310,8 @@ class _Replay:
                     self.charge["max_power_kw"] = p
                 if p and p > 0:
                     self.charge["last_ts"] = ts
+                if p is not None and "off_ts" not in self.charge:
+                    rules.add_power_sample(self.charge, ts, p, self._val(CONF_PRICE))
 
 
 async def async_import_history(
@@ -306,7 +332,8 @@ async def async_import_history(
     # Priority keeps simultaneous updates in a sensible order: values first,
     # then ignition/charging, so a trip starts with the values of that moment.
     prio = {conf[k]: 0 for k in keys if conf.get(k)}
-    prio[conf[CONF_IGNITION]] = 1
+    if conf.get(CONF_IGNITION):
+        prio[conf[CONF_IGNITION]] = 1
     if conf.get(CONF_CHARGING):
         prio[conf[CONF_CHARGING]] = 1
     for eid, rows in states.items():

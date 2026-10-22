@@ -95,7 +95,9 @@ def _schema(hass: HomeAssistant, d: dict[str, Any], with_name: bool) -> vol.Sche
                 CONF_TRIP_DISTANCE, description={"suggested_value": d.get(CONF_TRIP_DISTANCE)}
             ): sens,
             _req(CONF_SOC, d): sens,
-            _req(CONF_IGNITION, d): sens,
+            vol.Optional(
+                CONF_IGNITION, description={"suggested_value": d.get(CONF_IGNITION)}
+            ): sens,
             _req(CONF_TRACKER, d): EntitySelector(EntitySelectorConfig(domain="device_tracker")),
             vol.Optional(
                 CONF_RANGE, description={"suggested_value": d.get(CONF_RANGE)}

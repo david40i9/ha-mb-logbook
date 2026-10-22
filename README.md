@@ -17,6 +17,19 @@ It reads the entities of the [mbapi2020](https://github.com/ReneNulschDE/mbapi20
 
 Early development (0.x). Expect changes.
 
+## Requirements
+
+**Needed**
+- A car integration that gives you, as Home Assistant entities: an **odometer**, a **battery %** sensor and a **GPS device tracker**. The Mercedes integration (mbapi2020) fills these in automatically; for other cars, pick them yourself.
+- The **usable battery capacity** in kWh (to turn battery % into kWh).
+
+**Optional — each adds something**
+- **Ignition state**: the most precise trip start and end. Without it, a trip starts when the odometer or trip counter moves (or the car's position jumps) and ends after a few minutes without movement.
+- **Trip distance counter** (distance since start): 0.1-unit trip distances when the odometer only reports whole miles/km.
+- **Charging active** sensor: charging sessions. **Charging power**: peak power, and the energy and cost of home charges when there's no charger meter.
+- **Electricity price** sensor (per kWh): costs home charges at the live price — from the home charger meter if you have one, otherwise from the car's charging power.
+- **Home charger energy meter** (a total kWh sensor, e.g. from a Zappi, Sigen, Wallbox or smart plug): the most accurate home energy and cost.
+- **Charging rates** (set in the card): a fixed price per kWh, or free, for any other place you charge.
 ## Install
 
 Copy `custom_components/mb_logbook` into your `config/custom_components` folder and restart Home Assistant. Then go to **Settings → Devices & services → Add integration → MB Logbook** and pick your car.
@@ -56,7 +69,7 @@ Trips, distance, energy and efficiency this month; last trip distance, energy an
 
 ## How trips are detected
 
-A trip starts when the ignition leaves "off" and ends when it has been off for a few minutes (3 by default). Distance comes from the car's 0.1-resolution "distance since start" counter, checked against the odometer (which may only report whole miles). Ignition events that don't move the car (for example pre-conditioning) are ignored. The data is stored in `config/mb_logbook.db` (SQLite) and is included in Home Assistant backups.
+A trip starts when the ignition leaves "off" and ends when it has been off for a few minutes (3 by default). Without an ignition sensor, a trip starts when the car moves (odometer or trip counter going up, or a position jump of 200 m or more) and ends after the same few minutes without movement. Distance comes from the car's 0.1-resolution "distance since start" counter, checked against the odometer (which may only report whole miles). Ignition events that don't move the car (for example pre-conditioning) are ignored. The data is stored in `config/mb_logbook.db` (SQLite) and is included in Home Assistant backups.
 
 ## Limits
 

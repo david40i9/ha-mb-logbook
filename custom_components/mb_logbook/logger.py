@@ -56,7 +56,7 @@ from .const import (
     UNKNOWN_STATES,
 )
 from . import rules
-from .db import LogbookDB
+from .db import LogbookDB, distance_m
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -68,6 +68,20 @@ def _num(state: State | None) -> float | None:
         return float(state.state)
     except (TypeError, ValueError):
         return None
+
+
+# Without an ignition sensor, a position jump this big counts as the car moving.
+MOVE_TRIGGER_M = 200.0
+
+
+def _moved_m(old: State | None, new: State | None) -> float:
+    """Distance between two tracker states' positions (0 if either is unknown)."""
+    try:
+        a = (float(old.attributes["latitude"]), float(old.attributes["longitude"]))
+        b = (float(new.attributes["latitude"]), float(new.attributes["longitude"]))
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return 0.0
+    return distance_m(a[0], a[1], b[0], b[1])
 
 
 def _to_km(value: float | None, state: State | None) -> float | None:
@@ -132,10 +146,12 @@ class CarLogger:
 
     async def async_start(self) -> None:
         self._state = await self._store.async_load() or {}
-        watched = [
-            self.conf[CONF_IGNITION],
-            self.conf[CONF_TRACKER],
-        ]
+        watched = [self.conf[CONF_TRACKER]]
+        if self.conf.get(CONF_IGNITION):
+            watched.append(self.conf[CONF_IGNITION])
+        else:
+            # No ignition sensor: trips are detected from the car moving.
+            watched.append(self.conf[CONF_ODOMETER])
         if self.conf.get(CONF_CHARGING):
             watched.append(self.conf[CONF_CHARGING])
         if self.conf.get(CONF_TRIP_DISTANCE):
@@ -155,6 +171,12 @@ class CarLogger:
                     self.hass, [self.conf[CONF_CHARGE_POWER]], self._on_power
                 )
             )
+            if self.conf.get(CONF_PRICE):
+                self._unsubs.append(
+                    async_track_state_change_event(
+                        self.hass, [self.conf[CONF_PRICE]], self._on_price
+                    )
+                )
         self._resync()
 
     async def async_stop(self) -> None:
@@ -177,13 +199,21 @@ class CarLogger:
     @callback
     def _resync(self) -> None:
         """Bring saved state in line with the car after a restart."""
-        ign = self.hass.states.get(self.conf[CONF_IGNITION])
-        if self._state.get("trip") and ign is not None and ign.state in IGNITION_OFF:
-            # Ended while HA was down: close it now using the last known values.
-            self._state["trip"].setdefault("off_ts", time.time())
-            self._schedule_trip_end(0)
-        elif not self._state.get("trip") and self._ignition_on(ign):
-            self._start_trip()
+        if self.conf.get(CONF_IGNITION):
+            ign = self.hass.states.get(self.conf[CONF_IGNITION])
+            if self._state.get("trip") and ign is not None and ign.state in IGNITION_OFF:
+                # Ended while HA was down: close it now using the last known values.
+                self._state["trip"].setdefault("off_ts", time.time())
+                self._schedule_trip_end(0)
+            elif not self._state.get("trip") and self._ignition_on(ign):
+                self._start_trip()
+        elif self._state.get("trip"):
+            # Movement mode: wait out the stop time from the last movement seen.
+            trip = self._state["trip"]
+            last = trip.get("off_ts") or trip["start_ts"]
+            stop = self.conf.get(CONF_STOP_MINUTES, DEFAULT_STOP_MINUTES) * 60
+            trip["off_ts"] = last
+            self._schedule_trip_end(max(0.0, last + stop - time.time()))
         if self.conf.get(CONF_CHARGING):
             chg = self.hass.states.get(self.conf[CONF_CHARGING])
             on = chg is not None and chg.state == "on"
@@ -259,14 +289,35 @@ class CarLogger:
     def _on_change(self, event: Event[EventStateChangedData]) -> None:
         entity_id = event.data["entity_id"]
         new = event.data["new_state"]
-        if entity_id == self.conf[CONF_IGNITION]:
+        old = event.data["old_state"]
+        moving_mode = not self.conf.get(CONF_IGNITION)
+        if entity_id == self.conf.get(CONF_IGNITION):
             self._on_ignition(new)
         elif entity_id == self.conf[CONF_TRACKER]:
+            if moving_mode and _moved_m(old, new) >= MOVE_TRIGGER_M:
+                self._on_movement()
             self._on_position()
         elif entity_id == self.conf.get(CONF_CHARGING):
             self._on_charging(new)
         elif entity_id == self.conf.get(CONF_TRIP_DISTANCE):
+            if moving_mode and (_num(new) or 0) > (_num(old) or 0):
+                self._on_movement()
             self._on_counter()
+        elif moving_mode and entity_id == self.conf[CONF_ODOMETER]:
+            before, after = _num(old), _num(new)
+            if before is not None and after is not None and after > before:
+                self._on_movement(_to_km(before, old))
+
+    @callback
+    def _on_movement(self, odo_before_km: float | None = None) -> None:
+        """No ignition sensor: the car moved, so a trip is on until it stops moving."""
+        if self._state.get("trip") is None:
+            self._start_trip(odo_before_km)
+        trip = self._state["trip"]
+        trip["off_ts"] = time.time()  # last movement; the trip ends after the stop time
+        self._save()
+        stop = self.conf.get(CONF_STOP_MINUTES, DEFAULT_STOP_MINUTES)
+        self._schedule_trip_end(stop * 60)
 
     @callback
     def _on_counter(self) -> None:
@@ -315,7 +366,7 @@ class CarLogger:
         self._end_timer = async_call_later(self.hass, timedelta(seconds=delay), _fire)
 
     @callback
-    def _start_trip(self) -> None:
+    def _start_trip(self, odo_start_km: float | None = None) -> None:
         pos = self._position()
         lat, lon = (pos[0], pos[1]) if pos else (None, None)
         place, _ = self._place(lat, lon)
@@ -323,7 +374,7 @@ class CarLogger:
         soc = self._soc()
         self._state["trip"] = {
             "start_ts": now,
-            "odo_start_km": self._odo_km(),
+            "odo_start_km": odo_start_km if odo_start_km is not None else self._odo_km(),
             "counter_last": self._counter_km(),
             "counter_km": 0.0,
             "soc_start": soc,
@@ -435,6 +486,8 @@ class CarLogger:
                 charge.pop("off_ts", None)
         elif charge:
             charge.setdefault("off_ts", time.time())  # when it really stopped
+            # No power flows while stopped (in case charging resumes within the gap).
+            rules.add_power_sample(charge, charge["off_ts"], 0.0, self._price())
             self._save()
             self._schedule_charge_end(CHARGE_GAP_MINUTES * 60)
 
@@ -453,6 +506,10 @@ class CarLogger:
             "cost": 0.0,
             "max_power_kw": 0.0,
         }
+        # Start the power integration with the current reading, if any.
+        if self.conf.get(CONF_CHARGE_POWER):
+            power = _num(self.hass.states.get(self.conf[CONF_CHARGE_POWER]))
+            rules.add_power_sample(self._state["charge"], time.time(), power or 0.0, self._price())
         park = self._state.setdefault("park", self._park_snapshot())
         park["charged"] = True
         self._save()
@@ -490,6 +547,9 @@ class CarLogger:
             self._save()
             self._notify()
             return  # nothing was actually added
+        # Close the power integration at the moment charging stopped.
+        rules.add_power_sample(charge, charge.get("off_ts") or time.time(), 0.0, None)
+        cost, basis = rules.charge_cost(charge, bool(self.conf.get(CONF_PRICE)))
         record = {
             "car": self.car_id,
             "start_ts": charge["start_ts"],
@@ -498,7 +558,8 @@ class CarLogger:
             "soc_end": soc_end,
             "kwh_car": kwh_car,
             "kwh_meter": round(meter, 3) if meter > 0 else None,
-            "cost": round(charge.get("cost") or 0.0, 4) if meter > 0 else None,
+            "cost": cost,
+            "cost_basis": basis,
             "max_power_kw": charge.get("max_power_kw") or None,
             "place": charge.get("place"),
             "at_home": charge.get("at_home"),
@@ -536,8 +597,23 @@ class CarLogger:
     def _on_power(self, event: Event[EventStateChangedData]) -> None:
         charge = self._state.get("charge")
         power = _num(event.data["new_state"])
-        if charge is None or power is None:
+        if charge is None or power is None or "off_ts" in charge:
             return
         if power > (charge.get("max_power_kw") or 0):
             charge["max_power_kw"] = power
-            self._save()
+        rules.add_power_sample(charge, time.time(), power, self._price())
+        self._save()
+
+    @callback
+    def _on_price(self, event: Event[EventStateChangedData]) -> None:
+        """Price changed mid-charge: start a new interval at the new price."""
+        charge = self._state.get("charge")
+        if charge is None or "off_ts" in charge or not charge.get("pw_last"):
+            return
+        rules.add_power_sample(charge, time.time(), None, _num(event.data["new_state"]))
+        self._save()
+
+    def _price(self) -> float | None:
+        if not self.conf.get(CONF_PRICE):
+            return None
+        return _num(self.hass.states.get(self.conf[CONF_PRICE]))

@@ -39,3 +39,5 @@ Ranked by value for effort, keeping MB Logbook local-only and multi-car.
 - [x] Sidebar page with overview charts and routes map (0.6)
 - [x] Period arrows, delete trip, charging rates with history (0.7)
 - [x] Suggest names for unnamed places from OpenStreetMap, on request only (0.8)
+- [x] Places keep the stops they were named from (0.9)
+- [x] Works without a charger meter (cost from the car's charging power) or an ignition sensor (trips from movement) (0.10)

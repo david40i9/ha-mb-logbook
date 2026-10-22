@@ -573,7 +573,7 @@ class MBLogbookCard extends HTMLElement {
           <td class=n>${c.soc_start ?? "–"}→${c.soc_end ?? "–"}%</td>
           <td class=n>${kwh != null ? kwh.toFixed(1) + " kWh" : "–"}<div class=dim>${src}</div></td>
           <td class=n>${c.max_power_kw ? c.max_power_kw.toFixed(1) + " kW" : "–"}</td>
-          <td class=n>${this._money(c.cost)}<div class=dim>${{ meter: "metered", rate: "place rate", free: "free" }[c.cost_source] || (c.cost == null ? "no rate" : "")}</div></td>
+          <td class=n>${this._money(c.cost)}<div class=dim>${{ meter: "metered", power: "live price", rate: "place rate", free: "free" }[c.cost_source] || (c.cost == null ? "no rate" : "")}</div></td>
           <td class=n>${c.cost_source === "rate" || c.cost_source === "free" ? this._money(c.rate) : c.kwh_meter && c.cost ? this._money(c.cost / c.kwh_meter) : ""}</td>
         </tr>${formRow}`;
       })
@@ -881,7 +881,7 @@ MBLogbookCard.css = `
   #mapbox ha-map { height: 100%; display: block; }
 `;
 
-const CARD_VERSION = "0.9.1";
+const CARD_VERSION = "0.10.0";
 
 if (!customElements.get("mb-logbook-card")) {
   customElements.define("mb-logbook-card", MBLogbookCard);

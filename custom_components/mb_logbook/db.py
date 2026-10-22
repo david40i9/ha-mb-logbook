@@ -83,6 +83,7 @@ MIGRATIONS = (
     ("trips", "park_drain_hours", "REAL"),
     ("charges", "lat", "REAL"),
     ("charges", "lon", "REAL"),
+    ("charges", "cost_basis", "TEXT"),
 )
 
 TRIP_COLS = (
@@ -93,7 +94,7 @@ TRIP_COLS = (
 )
 CHARGE_COLS = (
     "car", "start_ts", "end_ts", "soc_start", "soc_end", "kwh_car", "kwh_meter",
-    "cost", "max_power_kw", "place", "at_home", "lat", "lon",
+    "cost", "max_power_kw", "place", "at_home", "lat", "lon", "cost_basis",
 )
 
 
@@ -398,7 +399,8 @@ class LogbookDB:
         """Metered cost wins; otherwise cost the charge at its place's rate then."""
         d["rate"] = None
         if d.get("cost") is not None:
-            d["cost_source"] = "meter"
+            # "meter" (home charger meter) or "power" (car's charging power x live price)
+            d["cost_source"] = d.get("cost_basis") or "meter"
             return
         d["cost_source"] = None
         kwh = d.get("kwh_meter") or d.get("kwh_car")

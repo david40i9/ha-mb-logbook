@@ -65,6 +65,36 @@ def park_fields(park: dict[str, Any] | None, now: float, soc: float | None) -> d
     }
 
 
+def add_power_sample(
+    charge: dict[str, Any], ts: float, power_kw: float | None, price: float | None
+) -> None:
+    """Integrate the car's charging power into energy and cost.
+
+    Used when there's no home charger meter: each interval is costed at the
+    price in force during it. The car only reports power when it changes, so a
+    steady charge has long intervals; a gap is capped at 6 h so a stale reading
+    can't run away.
+    """
+    last = charge.get("pw_last")
+    if last:
+        dt_h = min(max(ts - last[0], 0.0), 6 * 3600) / 3600
+        kwh = (last[1] or 0.0) * dt_h
+        charge["kwh_power"] = (charge.get("kwh_power") or 0.0) + kwh
+        if last[2] is not None:
+            charge["cost_power"] = (charge.get("cost_power") or 0.0) + kwh * last[2]
+    charge["pw_last"] = [ts, power_kw if power_kw is not None else (last[1] if last else 0.0), price]
+
+
+def charge_cost(charge: dict[str, Any], has_price: bool) -> tuple[float | None, str | None]:
+    """(cost, basis) for a finished session: home meter first, else charging power."""
+    meter = charge.get("kwh_meter") or 0.0
+    if meter > 0:
+        return round(charge.get("cost") or 0.0, 4), "meter"
+    if has_price and charge.get("at_home") and (charge.get("kwh_power") or 0) > 0:
+        return round(charge.get("cost_power") or 0.0, 4), "power"
+    return None, None
+
+
 def trip_soc_end(
     soc_now: float | None, charge: dict[str, Any] | None, off_ts: float | None
 ) -> float | None:
