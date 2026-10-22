@@ -62,6 +62,10 @@ CREATE TABLE IF NOT EXISTS places (
     lon REAL NOT NULL,
     radius_m REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS place_labels (
+    location TEXT PRIMARY KEY,
+    label TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS trip_labels (
     car TEXT NOT NULL,
     start_ts INTEGER NOT NULL,
@@ -229,6 +233,10 @@ class LogbookDB:
                     "UPDATE charge_rates SET location = ? WHERE location = ?",
                     (place["name"], old[0]["name"]),
                 )
+                self._exec(
+                    "UPDATE OR REPLACE place_labels SET location = ? WHERE location = ?",
+                    (place["name"], old[0]["name"]),
+                )
             return int(place["id"])
         return self._insert("places", ("name", "lat", "lon", "radius_m"), place)
 
@@ -332,15 +340,53 @@ class LogbookDB:
         )
         places = self.places()
         labels = self._labels(car)
+        defaults = self.place_labels()
         out = []
         for r in rows:
             d = dict(r)
             pts = d.pop("points") or "[]"
             d["point_count"] = len(json.loads(pts))
             d["park_charged"] = bool(d["park_charged"])
+            d = self._name_trip(d, places)
             d["label"] = labels.get(round(d["start_ts"]))
-            out.append(self._name_trip(d, places))
+            d["label_auto"] = False
+            if d["label"] is None:
+                # No label of its own: the destination's default, else the start's.
+                auto = defaults.get(d.get("end_place") or "") or defaults.get(d.get("start_place") or "")
+                if auto:
+                    d["label"] = auto
+                    d["label_auto"] = True
+            out.append(d)
         return out
+
+    # ----- default labels per place ------------------------------------------------------
+
+    def place_labels(self) -> dict[str, str]:
+        return {r["location"]: r["label"] for r in self._exec("SELECT location, label FROM place_labels")}
+
+    def set_place_label(self, location: str, label: str | None) -> None:
+        if label:
+            self._exec(
+                "INSERT INTO place_labels (location, label) VALUES (?, ?) "
+                "ON CONFLICT (location) DO UPDATE SET label = excluded.label",
+                (location, label),
+            )
+        else:
+            self._exec("DELETE FROM place_labels WHERE location = ?", (location,))
+
+    def visited_locations(self) -> list[dict[str, Any]]:
+        """Named places trips start or end at, with visit counts (all cars)."""
+        places = self.places()
+        counts: dict[str, int] = {}
+        rows = self._exec(
+            "SELECT start_place, start_lat, start_lon, end_place, end_lat, end_lon FROM trips"
+        )
+        for r in rows:
+            d = self._name_trip(dict(r), places)
+            for name in {d.get("start_place"), d.get("end_place")}:
+                if name:
+                    counts[name] = counts.get(name, 0) + 1
+        return [{"location": k, "visits": v} for k, v in sorted(counts.items(), key=lambda kv: -kv[1])]
 
     # ----- trip labels -------------------------------------------------------------------
     # Kept apart from the trips table, keyed by car + start time (whole seconds),

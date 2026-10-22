@@ -108,13 +108,15 @@ class MBLogbookCard extends HTMLElement {
     }
     const { start, end } = this._range();
     const args = { entry_id: this._car.entry_id, start, end };
-    const [trips, charges, places, rates, labels] = await Promise.all([
+    const [trips, charges, places, rates, labels, placeLabels] = await Promise.all([
       this._hass.callWS({ type: "mb_logbook/trips", ...args }),
       this._hass.callWS({ type: "mb_logbook/charges", ...args }),
       this._hass.callWS({ type: "mb_logbook/places" }),
       this._hass.callWS({ type: "mb_logbook/rates" }).catch(() => ({ locations: [], rates: [] })),
       this._hass.callWS({ type: "mb_logbook/labels" }).catch(() => ["Business", "Personal", "Commute"]),
+      this._hass.callWS({ type: "mb_logbook/place_labels" }).catch(() => []),
     ]);
+    this._placeLabels = placeLabels;
     this._rates = rates;
     this._labels = labels;
     this._trips = trips;
@@ -189,6 +191,27 @@ class MBLogbookCard extends HTMLElement {
 
   _rateText(rate) {
     return rate === 0 ? "Free" : `${this._money(rate)}/kWh`;
+  }
+
+  /** Places tab: a default trip label for each place trips go to. */
+  _placeLabelSection() {
+    const rows = this._placeLabels || [];
+    if (!rows.length) return "";
+    const admin = this._hass.user?.is_admin;
+    const labels = [...new Set([...(this._labels || []), ...rows.map((r) => r.label).filter(Boolean)])];
+    const body = rows
+      .map((r, i) => {
+        const cell = admin
+          ? `<select class=plabel data-loc="${i}"><option value="">–</option>${labels
+              .map((l) => `<option value="${esc(l)}" ${l === r.label ? "selected" : ""}>${esc(l)}</option>`)
+              .join("")}<option value="__other">Other…</option></select>`
+          : esc(r.label || "–");
+        return `<tr><td>${esc(r.location)}</td><td class=n>${r.visits}</td><td>${cell}</td></tr>`;
+      })
+      .join("");
+    return `<h3 class=sub>Default trip labels</h3>
+      <div class=dim>Trips with no label of their own take the default of where they end, or else where they start (so Home → Work and Work → Home both count). Labels you pick on a trip always win.</div>
+      <table><thead><tr><th>Place</th><th class=n>Trips</th><th>Default label</th></tr></thead><tbody>${body}</tbody></table>`;
   }
 
   /** Places tab: each charging location with its rate history. */
@@ -516,11 +539,14 @@ class MBLogbookCard extends HTMLElement {
   }
 
   _labelCell(x) {
-    if (!this._hass.user?.is_admin) return x.label ? `<span class=chip>${esc(x.label)}</span>` : "";
+    if (!this._hass.user?.is_admin)
+      return x.label ? `<span class="chip ${x.label_auto ? "auto" : ""}">${esc(x.label)}</span>` : "";
     const opts = [...new Set([...(this._labels || []), ...(x.label ? [x.label] : [])])];
-    return `<select class=tlabel data-id="${x.id}">
-        <option value="">–</option>
-        ${opts.map((l) => `<option value="${esc(l)}" ${l === x.label ? "selected" : ""}>${esc(l)}</option>`).join("")}
+    // "" = no label of its own: shows the place's default ("auto: …") if there is one.
+    const manual = x.label_auto ? null : x.label;
+    return `<select class="tlabel ${x.label_auto ? "auto" : ""}" data-id="${x.id}" title="${x.label_auto ? "From the place's default label; pick one to override" : ""}">
+        <option value="">${x.label_auto ? `auto: ${esc(x.label)}` : "–"}</option>
+        ${opts.map((l) => `<option value="${esc(l)}" ${l === manual ? "selected" : ""}>${esc(l)}</option>`).join("")}
         <option value="__other">Other…</option>
       </select>`;
   }
@@ -684,6 +710,7 @@ class MBLogbookCard extends HTMLElement {
           ? `<table><thead><tr><th>Start</th><th>Where</th><th class=n>Battery</th><th class=n>Energy</th><th class=n>Peak</th><th class=n>Cost</th><th class=n>Per kWh</th></tr></thead><tbody>${this._chargeRows()}</tbody></table>`
           : `<table><thead><tr><th>Name</th><th>Radius</th><th class=n>Trip ends / charges</th><th></th></tr></thead><tbody>${this._placeRows()}</tbody></table>
              <div class="dim pad">Named places are shared by all cars. Home Assistant zones take priority where they overlap.</div>
+             ${this._placeLabelSection()}
              ${this._rateSection()}`;
     root.innerHTML = `<style>${MBLogbookCard.css}</style>
       <ha-card>
@@ -727,6 +754,22 @@ class MBLogbookCard extends HTMLElement {
         this._naming = null;
         this._render();
         if (this._open != null) this._showMap(this._open);
+      })
+    );
+    root.querySelectorAll("select.plabel").forEach((s) =>
+      s.addEventListener("change", async () => {
+        const loc = this._placeLabels[Number(s.dataset.loc)].location;
+        let label = s.value;
+        if (label === "__other") {
+          label = (prompt(`Default label for trips to and from ${loc}:`) || "").trim().slice(0, 30);
+          if (!label) return this._render();
+        }
+        try {
+          await this._hass.callWS({ type: "mb_logbook/place_label_set", location: loc, label: label || null });
+        } catch (e) {
+          alert(`Couldn't save the default label: ${e.message || e.code || e}`);
+        }
+        await this._load();
       })
     );
     root.querySelectorAll("button[data-rates]").forEach((b) =>
@@ -788,9 +831,11 @@ class MBLogbookCard extends HTMLElement {
           alert(`Couldn't save the label: ${e.message || e.code || e}`);
           return this._render();
         }
-        const t = this._trips.find((x) => x.id === id);
-        if (t) t.label = label || null;
         if (label && !this._labels.includes(label)) this._labels.push(label);
+        // Reload: clearing a trip's own label brings back its place's default.
+        const keep = { filter: this._labelFilter };
+        await this._load();
+        this._labelFilter = keep.filter;
         this._render();
       });
     });
@@ -953,6 +998,9 @@ MBLogbookCard.css = `
   .labelbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 8px; }
   .labelbar .seg button { padding: 4px 10px; font-size: .9em; }
   button.csv { margin-left: auto; padding: 5px 12px; border-radius: 8px; border: 1px solid var(--divider-color); background: none; color: var(--primary-text-color); font: inherit; font-size: .9em; cursor: pointer; }
+  select.tlabel.auto { color: var(--secondary-text-color); font-style: italic; }
+  .chip.auto { font-style: italic; }
+  select.plabel { padding: 3px 4px; border-radius: 6px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); font: inherit; font-size: .9em; }
   select.tlabel { padding: 3px 4px; border-radius: 6px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); font: inherit; font-size: .85em; max-width: 9em; }
   .periodbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .stepper { display: inline-flex; align-items: center; gap: 4px; }
@@ -989,7 +1037,7 @@ MBLogbookCard.css = `
   #mapbox ha-map { height: 100%; display: block; }
 `;
 
-const CARD_VERSION = "0.11.0";
+const CARD_VERSION = "0.12.0";
 
 if (!customElements.get("mb-logbook-card")) {
   customElements.define("mb-logbook-card", MBLogbookCard);

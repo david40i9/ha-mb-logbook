@@ -56,6 +56,8 @@ def async_register_websocket(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_suggest_names)
     websocket_api.async_register_command(hass, ws_trip_label)
     websocket_api.async_register_command(hass, ws_labels)
+    websocket_api.async_register_command(hass, ws_place_labels)
+    websocket_api.async_register_command(hass, ws_place_label_set)
     websocket_api.async_register_command(hass, ws_rates)
     websocket_api.async_register_command(hass, ws_rate_save)
     websocket_api.async_register_command(hass, ws_rate_delete)
@@ -220,6 +222,37 @@ async def ws_trip_label(hass: HomeAssistant, connection, msg: dict[str, Any]) ->
         connection.send_error(msg["id"], "not_found", "No such trip")
         return
     connection.send_result(msg["id"], {"trip_id": msg["trip_id"], "label": msg.get("label") or None})
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/place_labels"})
+@websocket_api.async_response
+async def ws_place_labels(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
+    """Places trips go to (with visits) and each one's default trip label."""
+    db = hass.data[DOMAIN]["db"]
+    visited = await hass.async_add_executor_job(db.visited_locations)
+    defaults = await hass.async_add_executor_job(db.place_labels)
+    seen = {v["location"] for v in visited}
+    for loc in defaults:  # defaults for places with no trips in the log yet
+        if loc not in seen:
+            visited.append({"location": loc, "visits": 0})
+    for v in visited:
+        v["label"] = defaults.get(v["location"])
+    connection.send_result(msg["id"], visited)
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/place_label_set",
+        vol.Required("location"): vol.All(str, vol.Strip, vol.Length(min=1, max=60)),
+        vol.Optional("label"): vol.Any(None, vol.All(str, vol.Strip, vol.Length(max=30))),
+    }
+)
+@websocket_api.async_response
+async def ws_place_label_set(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
+    db = hass.data[DOMAIN]["db"]
+    await hass.async_add_executor_job(db.set_place_label, msg["location"], msg.get("label") or None)
+    connection.send_result(msg["id"], {"location": msg["location"], "label": msg.get("label") or None})
 
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/rates"})

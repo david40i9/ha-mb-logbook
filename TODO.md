@@ -18,7 +18,7 @@ Ideas and planned work for MB Logbook. Not in any order yet.
 Ranked by value for effort, keeping MB Logbook local-only and multi-car.
 
 1. ~~**Export trips and charges to CSV**~~ (trips done in 0.11), filtered by period, car and place — for mileage claims and expenses. *(Tessie and TeslaFi exports; Tessie users use them for tax-time mileage.)*
-2. ~~**Business / personal tagging**~~ (labels done in 0.11; still to do: default label per place) on trips (with a default per place, e.g. trips to work), and a mileage summary per tag. *(TeslaFi / Tessie trip classification.)*
+2. ~~**Business / personal tagging**~~ (labels 0.11, default label per place 0.12) on trips (with a default per place, e.g. trips to work), and a mileage summary per tag. *(TeslaFi / Tessie trip classification.)*
 3. **Charging efficiency (gross vs net)**: metered kWh at the charger vs kWh that reached the battery, per session and per month — we already have both numbers for home charges. *(TeslaMate shows net and gross consumption.)*
 4. **Battery health trend**: projected range at 100% (range ÷ battery %), sampled at high charge levels, plotted month by month. *(TeslaMate "projected 100% range"; Tessie battery health.)*
 5. **Efficiency vs outside temperature**: record the outdoor temperature (any HA weather or temperature sensor) at each trip and chart efficiency against it — explains winter drops. *(TeslaMate efficiency dashboards; Tessie.)*
@@ -41,4 +41,5 @@ Ranked by value for effort, keeping MB Logbook local-only and multi-car.
 - [x] Suggest names for unnamed places from OpenStreetMap, on request only (0.8)
 - [x] Places keep the stops they were named from (0.9)
 - [x] Trip labels, label filter with totals, CSV export (0.11)
+- [x] Default trip label per place (0.12)
 - [x] Works without a charger meter (cost from the car's charging power) or an ignition sensor (trips from movement) (0.10)
