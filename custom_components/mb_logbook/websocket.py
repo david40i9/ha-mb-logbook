@@ -21,6 +21,7 @@ from .const import (
     CONF_CAR_NAME,
     CONF_CHARGER_ENERGY,
     CONF_DISTANCE_UNIT,
+    CONF_HOME_ZONE,
     DOMAIN,
     IDLE_MIN_HOURS,
     SIGNAL_UPDATED,
@@ -235,8 +236,16 @@ async def ws_place_labels(hass: HomeAssistant, connection, msg: dict[str, Any]) 
     for loc in defaults:  # defaults for places with no trips in the log yet
         if loc not in seen:
             visited.append({"location": loc, "visits": 0})
+    # Names of the cars' home zones: the card asks before giving these a default,
+    # since nearly every trip starts or ends at home.
+    homes = set()
+    for entry in _entries(hass).values():
+        st = hass.states.get(entry_conf(entry).get(CONF_HOME_ZONE, "zone.home"))
+        if st is not None:
+            homes.add(st.name)
     for v in visited:
         v["label"] = defaults.get(v["location"])
+        v["is_home"] = v["location"] in homes
     connection.send_result(msg["id"], visited)
 
 

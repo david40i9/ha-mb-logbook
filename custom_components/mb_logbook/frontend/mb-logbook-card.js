@@ -206,7 +206,7 @@ class MBLogbookCard extends HTMLElement {
               .map((l) => `<option value="${esc(l)}" ${l === r.label ? "selected" : ""}>${esc(l)}</option>`)
               .join("")}<option value="__other">Other…</option></select>`
           : esc(r.label || "–");
-        return `<tr><td>${esc(r.location)}</td><td class=n>${r.visits}</td><td>${cell}</td></tr>`;
+        return `<tr><td>${esc(r.location)}${r.is_home ? " <span class=chip>home</span>" : ""}</td><td class=n>${r.visits}</td><td>${cell}</td></tr>`;
       })
       .join("");
     return `<h3 class=sub>Default trip labels</h3>
@@ -707,11 +707,11 @@ class MBLogbookCard extends HTMLElement {
       this._tab === "trips"
         ? `${this._labelBar()}<table><thead><tr><th>Start</th><th>Route</th><th>Label</th><th class=n>Distance</th><th class=n>Battery</th><th class=n>Used</th><th class=n>Efficiency</th><th class=n>Parked before</th><th></th></tr></thead><tbody>${this._tripRows()}</tbody></table>`
         : this._tab === "charges"
-          ? `<table><thead><tr><th>Start</th><th>Where</th><th class=n>Battery</th><th class=n>Energy</th><th class=n>Peak</th><th class=n>Cost</th><th class=n>Per kWh</th></tr></thead><tbody>${this._chargeRows()}</tbody></table>`
+          ? `<table><thead><tr><th>Start</th><th>Where</th><th class=n>Battery</th><th class=n>Energy</th><th class=n>Peak</th><th class=n>Cost</th><th class=n>Per kWh</th></tr></thead><tbody>${this._chargeRows()}</tbody></table>
+             ${this._rateSection()}`
           : `<table><thead><tr><th>Name</th><th>Radius</th><th class=n>Trip ends / charges</th><th></th></tr></thead><tbody>${this._placeRows()}</tbody></table>
              <div class="dim pad">Named places are shared by all cars. Home Assistant zones take priority where they overlap.</div>
-             ${this._placeLabelSection()}
-             ${this._rateSection()}`;
+             ${this._placeLabelSection()}`;
     root.innerHTML = `<style>${MBLogbookCard.css}</style>
       <ha-card>
         <div class=head><div class=title>${esc(this._config.title || this._car.name + " logbook")}${this._car.trip_active ? ' <span class="chip live">driving</span>' : ""}${this._car.charge_active ? ' <span class="chip live">charging</span>' : ""}</div>${cars}</div>
@@ -758,11 +758,17 @@ class MBLogbookCard extends HTMLElement {
     );
     root.querySelectorAll("select.plabel").forEach((s) =>
       s.addEventListener("change", async () => {
-        const loc = this._placeLabels[Number(s.dataset.loc)].location;
+        const row = this._placeLabels[Number(s.dataset.loc)];
+        const loc = row.location;
         let label = s.value;
         if (label === "__other") {
           label = (prompt(`Default label for trips to and from ${loc}:`) || "").trim().slice(0, 30);
           if (!label) return this._render();
+        }
+        // Nearly every trip starts or ends at home, so check before labelling them all.
+        if (label && row.is_home &&
+            !confirm(`${loc} is your home zone: ${row.visits} trips start or end there, so a default here would label almost all of them "${label}". Trips with their own label keep it.\n\nGive ${loc} this default anyway?`)) {
+          return this._render();
         }
         try {
           await this._hass.callWS({ type: "mb_logbook/place_label_set", location: loc, label: label || null });
@@ -1037,7 +1043,7 @@ MBLogbookCard.css = `
   #mapbox ha-map { height: 100%; display: block; }
 `;
 
-const CARD_VERSION = "0.12.0";
+const CARD_VERSION = "0.12.1";
 
 if (!customElements.get("mb-logbook-card")) {
   customElements.define("mb-logbook-card", MBLogbookCard);
