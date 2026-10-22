@@ -48,6 +48,9 @@ def async_register_websocket(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_trip_points)
     websocket_api.async_register_command(hass, ws_charges)
     websocket_api.async_register_command(hass, ws_delete_trip)
+    websocket_api.async_register_command(hass, ws_rates)
+    websocket_api.async_register_command(hass, ws_rate_save)
+    websocket_api.async_register_command(hass, ws_rate_delete)
     websocket_api.async_register_command(hass, ws_stats)
     websocket_api.async_register_command(hass, ws_routes)
     websocket_api.async_register_command(hass, ws_places)
@@ -60,6 +63,66 @@ def _refresh_all(hass: HomeAssistant) -> None:
     """Place names feed the last-trip/last-charge attributes of every car."""
     for entry in _entries(hass).values():
         async_dispatcher_send(hass, SIGNAL_UPDATED.format(entry.runtime_data.car_id))
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/rates"})
+@websocket_api.async_response
+async def ws_rates(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
+    """Charging locations seen so far, plus every rate entry."""
+    db = hass.data[DOMAIN]["db"]
+    rates = await hass.async_add_executor_job(db.rates)
+    locations = await hass.async_add_executor_job(db.charge_locations)
+    known = {loc["location"] for loc in locations}
+    for r in rates:  # rates for places with no charges yet still need a row
+        if r["location"] not in known:
+            locations.append({"location": r["location"], "charges": 0, "metered": 0, "last_ts": 0})
+            known.add(r["location"])
+    connection.send_result(msg["id"], {"locations": locations, "rates": rates})
+
+
+def _local_midnight(date_str: str) -> float:
+    day = dt_util.parse_date(date_str)
+    if day is None:
+        raise vol.Invalid("bad date")
+    return dt_util.start_of_local_day(day).timestamp()
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/rate_save",
+        vol.Optional("rate_id"): int,
+        vol.Required("location"): vol.All(str, vol.Strip, vol.Length(min=1, max=60)),
+        vol.Required("valid_from"): str,  # YYYY-MM-DD, local
+        vol.Required("rate"): vol.All(vol.Coerce(float), vol.Range(min=0, max=10)),
+    }
+)
+@websocket_api.async_response
+async def ws_rate_save(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
+    db = hass.data[DOMAIN]["db"]
+    try:
+        valid_from = _local_midnight(msg["valid_from"])
+    except vol.Invalid:
+        connection.send_error(msg["id"], "invalid_format", "Use a date like 2026-10-22")
+        return
+    rate_id = await hass.async_add_executor_job(
+        db.save_rate,
+        {"id": msg.get("rate_id"), "location": msg["location"], "valid_from": valid_from, "rate": msg["rate"]},
+    )
+    _refresh_all(hass)
+    connection.send_result(msg["id"], {"id": rate_id})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/rate_delete", vol.Required("rate_id"): int}
+)
+@websocket_api.async_response
+async def ws_rate_delete(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
+    db = hass.data[DOMAIN]["db"]
+    await hass.async_add_executor_job(db.delete_rate, msg["rate_id"])
+    _refresh_all(hass)
+    connection.send_result(msg["id"], {"deleted": msg["rate_id"]})
 
 
 def _month_key(ts: float) -> str:

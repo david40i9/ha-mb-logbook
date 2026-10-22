@@ -6,6 +6,7 @@ A Home Assistant integration that keeps a permanent logbook for Mercedes-Benz el
 - **Parked drain**: how much battery each car lost while parked between trips (parks that included a charge are marked, not counted).
 - **Charging sessions**: battery % added, kWh, and, with a home charger energy meter and an electricity price sensor, the metered energy and cost of each home charge credited to the car that was charging.
 - **Named places**: a start or end outside your Home Assistant zones shows as unnamed; name it from the card (with a radius) and every past and future trip or charge there takes that name. Places are shared by all cars and managed in the card's Places tab.
+- **Charging rates**: give any charging place (an HA zone or a named place) a price per kWh, or mark it free, with a start date. Charges without a meter are costed at the rate that applied when they started, so adding a new rate never changes older charges. Metered home charges always use the meter and the live price.
 - **Several cars**: add each car separately; the card switches between them.
 
 It reads the entities of the [mbapi2020](https://github.com/ReneNulschDE/mbapi2020) integration (any car that exposes an odometer, battery %, ignition state and GPS tracker works). It does not talk to Mercedes itself.
@@ -43,7 +44,7 @@ Registered automatically as a dashboard resource (and updated on each version); 
 
 ```yaml
 type: custom:mb-logbook-card
-days: 30          # 7, 30, 90 or 365
+period: month     # week, month, quarter or year (use the arrows to step back)
 # car: EQS        # optional: lock the card to one car (by name)
 ```
 

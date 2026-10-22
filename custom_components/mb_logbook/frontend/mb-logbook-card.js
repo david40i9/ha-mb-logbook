@@ -107,11 +107,13 @@ class MBLogbookCard extends HTMLElement {
     }
     const { start, end } = this._range();
     const args = { entry_id: this._car.entry_id, start, end };
-    const [trips, charges, places] = await Promise.all([
+    const [trips, charges, places, rates] = await Promise.all([
       this._hass.callWS({ type: "mb_logbook/trips", ...args }),
       this._hass.callWS({ type: "mb_logbook/charges", ...args }),
       this._hass.callWS({ type: "mb_logbook/places" }),
+      this._hass.callWS({ type: "mb_logbook/rates" }).catch(() => ({ locations: [], rates: [] })),
     ]);
+    this._rates = rates;
     this._trips = trips;
     this._charges = charges;
     this._places = places;
@@ -140,6 +142,58 @@ class MBLogbookCard extends HTMLElement {
         </tr>${this._openPlace === p.id ? `<tr class=maprow><td colspan=4><div class="dim">Drag the pin to move this place or the circle's edge to resize it, then press Save.</div><div id=mapbox class=small></div></td></tr>` : ""}`;
       })
       .join("");
+  }
+
+  _date(ts) {
+    return new Date(ts * 1000).toLocaleDateString(this._hass.locale?.language, { day: "numeric", month: "short", year: "numeric" });
+  }
+
+  _rateText(rate) {
+    return rate === 0 ? "Free" : `${this._money(rate)}/kWh`;
+  }
+
+  /** Places tab: each charging location with its rate history. */
+  _rateSection() {
+    const r = this._rates;
+    if (!r || !r.locations.length) return "";
+    const admin = this._hass.user?.is_admin;
+    const now = Date.now() / 1000;
+    const today = new Date().toISOString().slice(0, 10);
+    const rows = r.locations
+      .map((loc, i) => {
+        const hist = r.rates.filter((x) => x.location === loc.location).sort((a, b) => a.valid_from - b.valid_from);
+        const current = [...hist].reverse().find((x) => x.valid_from <= now);
+        const allMetered = loc.charges > 0 && loc.metered === loc.charges;
+        const cur = current
+          ? `${this._rateText(current.rate)} <span class=dim>since ${this._date(current.valid_from)}</span>`
+          : allMetered
+            ? `<span class=dim>metered at the live price</span>`
+            : `<span class=dim>no rate</span>`;
+        const open = this._openRate === i;
+        const histRows = hist.length
+          ? hist
+              .map(
+                (x) => `<div class=ratehist>From ${this._date(x.valid_from)}: <b>${this._rateText(x.rate)}</b>${x.valid_from > now ? " <span class=chip>upcoming</span>" : ""}
+                  ${admin ? `<button class=ratedel data-rate="${x.id}">Delete</button>` : ""}</div>`
+              )
+              .join("")
+          : `<div class=dim>No rates yet. Charges here have no cost${loc.metered ? " unless metered" : ""}.</div>`;
+        const form = admin
+          ? `<div class=nameform>
+               <span>New rate from</span><input type=date class=rdate value="${today}">
+               <input type=number class=rrate min=0 max=10 step=0.001 placeholder="per kWh, e.g. 0.79">
+               <label class=dim><input type=checkbox class=rfree> Free</label>
+               <button class="primary rsave" data-loc="${i}">Add rate</button>
+               <div class=dim>Charges from that date on use the new rate; earlier charges keep the rate they had. Metered home charges always use the meter.</div>
+             </div>`
+          : "";
+        return `<tr><td>${esc(loc.location)}</td><td>${cur}</td><td class=n>${loc.charges}</td>
+            <td class=n><button class=pmap data-rates="${i}">${open ? "Hide" : "Rates"}</button></td></tr>
+          ${open ? `<tr class=maprow><td colspan=4>${histRows}${form}</td></tr>` : ""}`;
+      })
+      .join("");
+    return `<h3 class=sub>Charging rates</h3>
+      <table><thead><tr><th>Where</th><th>Current rate</th><th class=n>Charges</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   }
 
   /** [[south, west], [north, east]] around a set of [lat, lon] points. */
@@ -347,19 +401,18 @@ class MBLogbookCard extends HTMLElement {
   _chargeTiles() {
     const ch = this._charges;
     const kwh = ch.reduce((s, c) => s + (c.kwh_meter ?? c.kwh_car ?? 0), 0);
-    const metered = ch.filter((c) => c.kwh_meter && c.cost != null);
-    const mKwh = metered.reduce((s, c) => s + c.kwh_meter, 0);
-    const mCost = metered.reduce((s, c) => s + c.cost, 0);
-    const tiles = [
+    // Costed charges: metered at home, or at a charging place's rate (free counts as 0).
+    const costed = ch.filter((c) => c.cost != null);
+    const cKwh = costed.reduce((s, c) => s + (c.kwh_meter ?? c.kwh_car ?? 0), 0);
+    const cost = costed.reduce((s, c) => s + c.cost, 0);
+    const uncosted = ch.length - costed.length;
+    return [
       ["Sessions", ch.length],
       ["Energy added", kwh ? `${kwh.toFixed(0)} kWh` : "–"],
       ["At home", ch.filter((c) => c.at_home).length],
+      ["Charging cost", costed.length ? this._money(cost) + (uncosted ? ` <small class=dim>+${uncosted} unpriced</small>` : "") : "–"],
+      ["Average per kWh", cKwh ? this._money(cost / cKwh) : "–"],
     ];
-    if (this._car.has_meter) {
-      tiles.push(["Home charging cost", mCost ? this._money(mCost) : "–"]);
-      tiles.push(["Average per kWh", mKwh ? this._money(mCost / mKwh) : "–"]);
-    }
-    return tiles;
   }
 
   _tripTiles() {
@@ -460,8 +513,8 @@ class MBLogbookCard extends HTMLElement {
           <td class=n>${c.soc_start ?? "–"}→${c.soc_end ?? "–"}%</td>
           <td class=n>${kwh != null ? kwh.toFixed(1) + " kWh" : "–"}<div class=dim>${src}</div></td>
           <td class=n>${c.max_power_kw ? c.max_power_kw.toFixed(1) + " kW" : "–"}</td>
-          <td class=n>${this._money(c.cost)}</td>
-          <td class=n>${c.kwh_meter && c.cost ? this._money(c.cost / c.kwh_meter) : ""}</td>
+          <td class=n>${this._money(c.cost)}<div class=dim>${{ meter: "metered", rate: "place rate", free: "free" }[c.cost_source] || (c.cost == null ? "no rate" : "")}</div></td>
+          <td class=n>${c.cost_source === "rate" || c.cost_source === "free" ? this._money(c.rate) : c.kwh_meter && c.cost ? this._money(c.cost / c.kwh_meter) : ""}</td>
         </tr>${formRow}`;
       })
       .join("");
@@ -495,7 +548,8 @@ class MBLogbookCard extends HTMLElement {
         : this._tab === "charges"
           ? `<table><thead><tr><th>Start</th><th>Where</th><th class=n>Battery</th><th class=n>Energy</th><th class=n>Peak</th><th class=n>Cost</th><th class=n>Per kWh</th></tr></thead><tbody>${this._chargeRows()}</tbody></table>`
           : `<table><thead><tr><th>Name</th><th>Radius</th><th class=n>Trip ends / charges</th><th></th></tr></thead><tbody>${this._placeRows()}</tbody></table>
-             <div class="dim pad">Named places are shared by all cars. Home Assistant zones take priority where they overlap.</div>`;
+             <div class="dim pad">Named places are shared by all cars. Home Assistant zones take priority where they overlap.</div>
+             ${this._rateSection()}`;
     root.innerHTML = `<style>${MBLogbookCard.css}</style>
       <ha-card>
         <div class=head><div class=title>${esc(this._config.title || this._car.name + " logbook")}${this._car.trip_active ? ' <span class="chip live">driving</span>' : ""}${this._car.charge_active ? ' <span class="chip live">charging</span>' : ""}</div>${cars}</div>
@@ -538,6 +592,42 @@ class MBLogbookCard extends HTMLElement {
         this._naming = null;
         this._render();
         if (this._open != null) this._showMap(this._open);
+      })
+    );
+    root.querySelectorAll("button[data-rates]").forEach((b) =>
+      b.addEventListener("click", () => {
+        const i = Number(b.dataset.rates);
+        this._openRate = this._openRate === i ? null : i;
+        this._render();
+      })
+    );
+    root.querySelectorAll("button.rsave").forEach((b) =>
+      b.addEventListener("click", async () => {
+        const row = b.closest("td");
+        const loc = this._rates.locations[Number(b.dataset.loc)].location;
+        const free = row.querySelector(".rfree").checked;
+        const rate = free ? 0 : Number(row.querySelector(".rrate").value);
+        const date = row.querySelector(".rdate").value;
+        if (!date || (!free && !(rate > 0))) return alert("Enter a rate per kWh (or tick Free) and a start date.");
+        try {
+          await this._hass.callWS({ type: "mb_logbook/rate_save", location: loc, valid_from: date, rate });
+        } catch (e) {
+          return alert(`Couldn't save the rate: ${e.message || e.code || e}`);
+        }
+        const keep = this._openRate;
+        await this._load();
+        this._openRate = keep;
+        this._render();
+      })
+    );
+    root.querySelectorAll("button.ratedel").forEach((b) =>
+      b.addEventListener("click", async () => {
+        if (!confirm("Delete this rate? Charges it covered will use the rate before it (or none).")) return;
+        await this._hass.callWS({ type: "mb_logbook/rate_delete", rate_id: Number(b.dataset.rate) });
+        const keep = this._openRate;
+        await this._load();
+        this._openRate = keep;
+        this._render();
       })
     );
     root.querySelectorAll("button.deltrip").forEach((b) =>
@@ -684,6 +774,9 @@ MBLogbookCard.css = `
   .seg { display: inline-flex; border: 1px solid var(--divider-color); border-radius: 10px; overflow: hidden; }
   .seg button { background: none; border: 0; color: var(--secondary-text-color); padding: 6px 12px; font: inherit; cursor: pointer; }
   .seg button.on { background: var(--primary-color); color: var(--text-primary-color, #fff); }
+  h3.sub { font-size: 1em; font-weight: 600; margin: 18px 0 6px; }
+  .ratehist { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+  button.ratedel { padding: 2px 8px; border-radius: 6px; border: 1px solid var(--divider-color); background: none; color: var(--secondary-text-color); font: inherit; font-size: .85em; cursor: pointer; }
   .tripactions { display: flex; justify-content: flex-end; padding-top: 8px; }
   button.deltrip { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--error-color, #f38ba8); background: none; color: var(--error-color, #f38ba8); font: inherit; cursor: pointer; }
   .periodbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

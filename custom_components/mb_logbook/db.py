@@ -62,6 +62,13 @@ CREATE TABLE IF NOT EXISTS places (
     lon REAL NOT NULL,
     radius_m REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS charge_rates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    location TEXT NOT NULL,
+    valid_from REAL NOT NULL,
+    rate REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS charge_rates_loc ON charge_rates (location, valid_from);
 """
 
 # Columns added after 0.1.0: (table, column, type)
@@ -91,6 +98,17 @@ def distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     dl = math.radians(lon2 - lon1)
     a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
     return 2 * r * math.asin(math.sqrt(a))
+
+
+def rate_at(rates: list[dict[str, Any]], ts: float) -> dict[str, Any] | None:
+    """The rate entry in force at ``ts`` (rates sorted by valid_from), or None."""
+    current = None
+    for r in rates:
+        if r["valid_from"] <= ts:
+            current = r
+        else:
+            break
+    return current
 
 
 def match_place(places: list[dict[str, Any]], lat: float | None, lon: float | None):
@@ -154,12 +172,67 @@ class LogbookDB:
 
     def save_place(self, place: dict[str, Any]) -> int:
         if place.get("id"):
+            old = self._exec("SELECT name FROM places WHERE id = ?", (place["id"],))
             self._exec(
                 "UPDATE places SET name = ?, lat = ?, lon = ?, radius_m = ? WHERE id = ?",
                 (place["name"], place["lat"], place["lon"], place["radius_m"], place["id"]),
             )
+            if old and old[0]["name"] != place["name"]:
+                # Rates follow the place when it is renamed.
+                self._exec(
+                    "UPDATE charge_rates SET location = ? WHERE location = ?",
+                    (place["name"], old[0]["name"]),
+                )
             return int(place["id"])
         return self._insert("places", ("name", "lat", "lon", "radius_m"), place)
+
+    # ----- charging rates ----------------------------------------------------------------
+    # A location (an HA zone name or a named place) can have a history of rates:
+    # each entry applies from ``valid_from`` until the next one. A charge with no
+    # metered cost is costed at the rate in force when it started, so adding a
+    # new rate never changes earlier charges.
+
+    def rates(self) -> list[dict[str, Any]]:
+        return [
+            dict(r)
+            for r in self._exec(
+                "SELECT * FROM charge_rates ORDER BY location COLLATE NOCASE, valid_from"
+            )
+        ]
+
+    def _rates_by_location(self) -> dict[str, list[dict[str, Any]]]:
+        out: dict[str, list[dict[str, Any]]] = {}
+        for r in self.rates():
+            out.setdefault(r["location"], []).append(r)
+        return out
+
+    def save_rate(self, rate: dict[str, Any]) -> int:
+        if rate.get("id"):
+            self._exec(
+                "UPDATE charge_rates SET location = ?, valid_from = ?, rate = ? WHERE id = ?",
+                (rate["location"], rate["valid_from"], rate["rate"], rate["id"]),
+            )
+            return int(rate["id"])
+        return self._insert("charge_rates", ("location", "valid_from", "rate"), rate)
+
+    def delete_rate(self, rate_id: int) -> None:
+        self._exec("DELETE FROM charge_rates WHERE id = ?", (rate_id,))
+
+    def charge_locations(self) -> list[dict[str, Any]]:
+        """Every place a charge has happened (named), with counts and metered share."""
+        places = self.places()
+        out: dict[str, dict[str, Any]] = {}
+        for r in self._exec("SELECT place, lat, lon, kwh_meter, start_ts FROM charges"):
+            name = r["place"]
+            if name is None and (p := match_place(places, r["lat"], r["lon"])):
+                name = p["name"]
+            if name is None:
+                continue
+            loc = out.setdefault(name, {"location": name, "charges": 0, "metered": 0, "last_ts": 0})
+            loc["charges"] += 1
+            loc["metered"] += 1 if r["kwh_meter"] else 0
+            loc["last_ts"] = max(loc["last_ts"], r["start_ts"])
+        return sorted(out.values(), key=lambda x: -x["charges"])
 
     def delete_place(self, place_id: int) -> None:
         self._exec("DELETE FROM places WHERE id = ?", (place_id,))
@@ -267,6 +340,7 @@ class LogbookDB:
             (car, start_ts, end_ts, limit),
         )
         places = self.places()
+        rates = self._rates_by_location()
         out = []
         for r in rows:
             d = dict(r)
@@ -275,8 +349,25 @@ class LogbookDB:
             if d.get("place") is None and (p := match_place(places, d.get("lat"), d.get("lon"))):
                 d["place"] = p["name"]
                 d["place_id"] = p["id"]
+            self._apply_rate(d, rates)
             out.append(d)
         return out
+
+    @staticmethod
+    def _apply_rate(d: dict[str, Any], rates: dict[str, list[dict[str, Any]]]) -> None:
+        """Metered cost wins; otherwise cost the charge at its place's rate then."""
+        d["rate"] = None
+        if d.get("cost") is not None:
+            d["cost_source"] = "meter"
+            return
+        d["cost_source"] = None
+        kwh = d.get("kwh_meter") or d.get("kwh_car")
+        entry = rate_at(rates.get(d.get("place") or "", []), d["start_ts"])
+        if entry is None or kwh is None:
+            return
+        d["rate"] = entry["rate"]
+        d["cost"] = round(kwh * entry["rate"], 4)
+        d["cost_source"] = "free" if entry["rate"] == 0 else "rate"
 
     def last_charge(self, car: str) -> dict[str, Any] | None:
         rows = self.charges(car, 0, 1e12, limit=1)
@@ -329,20 +420,16 @@ class LogbookDB:
             "FROM trips WHERE car = ? AND start_ts >= ? AND start_ts < ?",
             (car, start_ts, end_ts),
         )[0]
-        c = self._exec(
-            "SELECT COUNT(*) AS n, COALESCE(SUM(COALESCE(kwh_meter, kwh_car)), 0) AS kwh, "
-            "COALESCE(SUM(cost), 0) AS cost FROM charges "
-            "WHERE car = ? AND start_ts >= ? AND start_ts < ?",
-            (car, start_ts, end_ts),
-        )[0]
+        # Charges go through charges() so place names and rate costs are applied.
+        ch = self.charges(car, start_ts, end_ts, limit=100000)
         return {
             "trips": t["n"],
             "distance_km": t["km"],
             "soc_used": t["soc_used"],
             "distance_km_with_soc": t["km_with_soc"],
-            "charges": c["n"],
-            "charged_kwh": c["kwh"],
-            "charge_cost": c["cost"],
+            "charges": len(ch),
+            "charged_kwh": sum((c.get("kwh_meter") or c.get("kwh_car") or 0) for c in ch),
+            "charge_cost": sum((c.get("cost") or 0) for c in ch),
         }
 
     def idle_parks(self, car: str, since_ts: float, min_hours: float) -> list[tuple]:
