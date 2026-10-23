@@ -1,101 +1,174 @@
-# Mercedes EV Logbook
+<p align="center">
+  <img src="https://raw.githubusercontent.com/david40i9/ha-mercedes-ev-logbook/main/custom_components/mb_logbook/brand/icon@2x.png" width="112" alt="">
+</p>
 
-A Home Assistant integration that keeps a permanent trip logbook for Mercedes-Benz electric cars (EQA, EQB, EQE, EQS, EQV, the electric CLA and others) — a mileage log, charging log and battery tracker in one:
+<h1 align="center">Mercedes EV Logbook</h1>
 
-- **Trips**: start and end time, distance, battery used, kWh and efficiency, start and end place, and the route.
-- **Parked drain**: how much battery each car lost while parked between trips (parks that included a charge are marked, not counted).
-- **Charging sessions**: battery % added, kWh, and, with a home charger energy meter and an electricity price sensor, the metered energy and cost of each home charge credited to the car that was charging.
-- **Named places**: a start or end outside your Home Assistant zones shows as unnamed; name it from the card (with a radius) and every past and future trip or charge there takes that name. The stop you named it from stays linked even if you move the circle (the car's GPS can be tens of metres out), and later stops near it get the name too; naming another stop with an existing name links it to that place. Places are shared by all cars and managed in the card's Places tab.
-- **Charging rates** (Charging tab): give any charging place (an HA zone or a named place) a price per kWh, or mark it free, with a start date. Charges without a meter are costed at the rate that applied when they started, so adding a new rate never changes older charges. Metered home charges always use the meter and the live price.
-- **Trip labels and mileage export**: label each trip (Business, Personal, Commute, or your own), filter by label (the totals follow), and export the trips shown as CSV for mileage claims. Labels are kept separately, so re-importing history never loses them. Give a place a default label (Places tab) and trips ending there, or else starting there, take it automatically, shown as "auto" until you pick one yourself.
-- **Several cars**: add each car separately; the card switches between them.
+<p align="center">
+  A permanent trip, mileage, charging and battery logbook for Mercedes-Benz electric cars in Home Assistant.
+</p>
 
-It reads the entities of the [mbapi2020](https://github.com/ReneNulschDE/mbapi2020) integration (any car that exposes an odometer, battery %, ignition state and GPS tracker works). It does not talk to Mercedes itself.
+<p align="center">
+  <a href="https://github.com/david40i9/ha-mercedes-ev-logbook/releases"><img src="https://img.shields.io/github/v/release/david40i9/ha-mercedes-ev-logbook?style=flat-square" alt="Release"></a>
+  <a href="https://hacs.xyz"><img src="https://img.shields.io/badge/HACS-custom-41BDF5?style=flat-square" alt="HACS"></a>
+  <a href="https://github.com/david40i9/ha-mercedes-ev-logbook/actions/workflows/validate.yml"><img src="https://img.shields.io/github/actions/workflow/status/david40i9/ha-mercedes-ev-logbook/validate.yml?style=flat-square&label=validation" alt="Validation"></a>
+  <img src="https://img.shields.io/badge/Home%20Assistant-2026.3%2B-18BCF2?style=flat-square" alt="Home Assistant 2026.3+">
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/david40i9/ha-mercedes-ev-logbook?style=flat-square" alt="MIT licence"></a>
+</p>
 
-**Privacy:** everything stays in Home Assistant. Places are named from your own Home Assistant zones and your own named places; there is no automatic address lookup. The one exception is optional: when naming a place you can press **Suggest names**, which looks up named shops and venues near the pin in OpenStreetMap data (Photon by Komoot, falling back to the Overpass API). That sends only that one point, only when you press it. The route map is Home Assistant's built-in map component, which loads the same map tiles as the standard map card.
+<p align="center">
+  <img src="https://raw.githubusercontent.com/david40i9/ha-mercedes-ev-logbook/main/docs/images/overview.png" alt="The Mercedes EV Logbook overview page: monthly figures, mileage by label, and charts">
+</p>
 
-**Not affiliated with Mercedes-Benz.** This is an independent, community project. Mercedes-Benz and EQ are trademarks of Mercedes-Benz Group AG, used here only to say which cars it works with.
+Every drive, park and charge of your EQA, EQB, EQE, EQS, EQV, electric CLA or other Mercedes EV, kept in Home Assistant for as long as you like: where you went, how far, how much battery and energy it took, what the car lost while parked, and what each charge cost. Label trips Business, Commute or Personal and export them for mileage claims.
 
-## Status
+It builds on the [MercedesME 2020 (mbapi2020)](https://github.com/ReneNulschDE/mbapi2020) integration and never talks to Mercedes itself. Everything stays on your Home Assistant.
 
-Early development (0.x). Expect changes.
+> *Screenshots use made-up demo data.*
 
-## Requirements
+## Highlights
 
-**Needed**
-- A car integration that gives you, as Home Assistant entities: an **odometer**, a **battery %** sensor and a **GPS device tracker**. The Mercedes integration (mbapi2020) fills these in automatically; for other cars, pick them yourself.
-- The **usable battery capacity** in kWh (to turn battery % into kWh).
+| | |
+|---|---|
+| 🚗 **Trips** | Start and end, distance, battery used, kWh, efficiency, outside temperature and the route on a map |
+| 🅿️ **Parked drain** | What the car lost between trips, and an idle-drain sensor in % per day |
+| ⚡ **Charging** | Every session with kWh, peak power and cost: metered at home, a fixed rate (or free) anywhere else, with rate history |
+| 🏷️ **Mileage claims** | Business / Commute / Personal labels, a default label per place, mileage by label and CSV export |
+| 📍 **Your own places** | Name any stop with a draggable, resizable circle; the name reaches back through all your history |
+| 🔋 **Battery health** | The range the car predicts at 100%, month by month |
+| 🌡️ **Efficiency vs temperature** | How much winter really costs you, from Home Assistant's own weather |
+| 🕘 **Your past trips too** | On install it rebuilds earlier trips and charges from Home Assistant's history |
+| 🛠️ **Fix the odd bad trip** | Split, merge or delete |
+| 🚙🚙 **Several cars** | Add each car; the card and page switch between them |
 
-**Optional — each adds something**
-- **Ignition state**: the most precise trip start and end. Without it, a trip starts when the odometer or trip counter moves (or the car's position jumps) and ends after a few minutes without movement.
-- **Trip distance counter** (distance since start): 0.1-unit trip distances when the odometer only reports whole miles/km.
-- **Charging active** sensor: charging sessions. **Charging power**: peak power, and the energy and cost of home charges when there's no charger meter.
-- **Electricity price** sensor (per kWh): costs home charges at the live price — from the home charger meter if you have one, otherwise from the car's charging power.
-- **Home charger energy meter** (a total kWh sensor, e.g. from a Zappi, Sigen, Wallbox or smart plug): the most accurate home energy and cost.
-- **Charging rates** (set in the card): a fixed price per kWh, or free, for any other place you charge.
+## Screenshots
+
+**Trips:** labels (picked or automatic from the place), charges shown between trips, sortable columns and CSV export.
+
+<img src="https://raw.githubusercontent.com/david40i9/ha-mercedes-ev-logbook/main/docs/images/trips.png" alt="Trips tab">
+
+**Charging:** sessions with energy, peak power and cost, and charging rates per place with their history.
+
+<img src="https://raw.githubusercontent.com/david40i9/ha-mercedes-ev-logbook/main/docs/images/charging.png" alt="Charging tab">
+
+**Places:** named places and default trip labels. Open **Map** to drag a place's pin or resize its circle.
+
+<img src="https://raw.githubusercontent.com/david40i9/ha-mercedes-ev-logbook/main/docs/images/places.png" alt="Places tab">
+
 ## Install
 
-**HACS:** add `https://github.com/david40i9/ha-mercedes-ev-logbook` as a custom repository (type: Integration), download **Mercedes EV Logbook** and restart Home Assistant.
+1. In **HACS**, open the ⋮ menu → **Custom repositories**, add `https://github.com/david40i9/ha-mercedes-ev-logbook` with type **Integration**.
+2. Find **Mercedes EV Logbook** in HACS, select **Download**, then restart Home Assistant.
+3. Go to **Settings → Devices & services → Add integration → Mercedes EV Logbook** and pick your car.
 
-**Manual:** copy `custom_components/mb_logbook` into your `config/custom_components` folder and restart Home Assistant.
+<details>
+<summary>Manual install</summary>
 
-Then go to **Settings → Devices & services → Add integration → Mercedes EV Logbook** and pick your car.
+Download the latest [release](https://github.com/david40i9/ha-mercedes-ev-logbook/releases), copy `custom_components/mb_logbook` into your `config/custom_components` folder and restart Home Assistant.
+</details>
+
+The **Mercedes EV Logbook** page appears in the sidebar, and the card is registered for your dashboards automatically.
 
 ## Setup
 
-1. Pick the car from the Mercedes integration; its sensors are filled in automatically.
-2. Enter the usable battery capacity in kWh (used to turn battery % into kWh).
-3. Optional: a home charger energy meter (a total kWh sensor) and an electricity price sensor (per kWh). While a car is charging in the home zone, the meter's increase and its cost at the live price are credited to that car's session.
+Pick the car from the Mercedes integration and its sensors are filled in for you. Enter the **usable battery capacity** in kWh:
 
-## Existing history
+| Model | Usable kWh (approx.) |
+|---|---|
+| EQA / EQB | 66.5 |
+| CLA (electric) | 85 |
+| EQC | 80 |
+| EQE saloon / SUV | 89 – 90.6 |
+| EQS saloon / SUV | 107.8 – 108.4 |
+| EQV | 90 |
 
-When a car is added, Mercedes EV Logbook rebuilds its earlier trips and charges from Home Assistant's recorded history (as far back as your recorder keeps it), using the same rules as live logging. Run the **Mercedes EV Logbook: Import history** action to do it again; it only replaces previously imported rows, never live ones.
+Check your model year's spec sheet; capacities changed between versions. Everything can be changed later with **Configure**.
 
-## Sidebar page
+### What it uses
 
-Mercedes EV Logbook adds a **Mercedes EV Logbook** page to the sidebar:
+| | Needed? | What it adds |
+|---|---|---|
+| Odometer, battery %, GPS tracker | **Yes** | Trips, distance, energy and routes |
+| Ignition state | Optional | The most precise trip start and end (otherwise trips are detected from the car moving) |
+| Trip distance counter | Optional | 0.1-mile/km trip distances when the odometer only reports whole units |
+| Charging active, charging power | Optional | Charging sessions and peak power |
+| Electricity price sensor | Optional | Home charges costed at the live price |
+| Home charger energy meter | Optional | The most accurate home energy and cost (any total-kWh sensor: Zappi, Wallbox, smart plug…) |
+| Outside temperature | Optional | Defaults to Home Assistant's weather for your home; or pick any temperature sensor |
 
-- **Overview**: mileage by trip label (Business first) with a business-mileage chart, for any week, month, 3 months or year, with arrows to step back; this month's trips, distance, energy, efficiency, charging and idle drain against last month; 12-month charts of distance, energy used vs charged, charging cost and efficiency; **battery health** (the range the car predicts at 100%, month by month); **efficiency vs outside temperature**; a map of this month's routes; your most-visited places.
-- **Logbook**: the full logbook (trips, charging, places) for the selected car. Every table sorts by any column.
+Any car that provides these entities works, not only Mercedes. Pick them yourself in the setup form.
 
-Outside temperature comes from Home Assistant's own weather for your home location (or a temperature sensor you choose in the car's options). Each trip stores it when it starts.
+## Using it
 
-## Fixing trips
+**Sidebar page.** *Overview* shows this month against last; mileage by label for any week, month, 3 months or year; 12-month charts of distance, energy, charging cost and efficiency; battery health; efficiency against outside temperature; this month's routes; and your most-visited places. *Logbook* is the full card for the selected car.
 
-- **Split at the stop**: two drives logged as one (for example the car lost signal in an underground car park before it reported the ignition off) are split at the longest stop. With an ignition sensor, 30 minutes without movement also ends a trip automatically.
-- **Merge with next trip**: one drive logged as two.
-- **Delete this trip**: for bogus trips.
+**Trips.** Click a trip to see its route. Choose a label from the dropdown, or give a place a default label (Places tab) and trips there are labelled automatically. Filter by label and the totals follow; **Export CSV** saves the trips shown.
 
-## Exports and summary
+**Places.** A stop outside your Home Assistant zones shows as *unnamed · name it*. Name it and drag the circle to fit; every past and future trip or charge there takes the name. Press **Suggest names** for nearby shops and venues from OpenStreetMap.
 
-- Trips and charging sessions export as CSV from their tabs.
-- Optional **monthly summary** (set in the car's options): last month's trips, distance, energy, charging and idle drain, sent on the 1st at 09:00 as a Home Assistant notification or through any notify service. The **Send monthly summary** action sends it now.
+**Charging rates.** Give any charging place a price per kWh, or mark it free, from a date. Each charge is costed at the rate in force when it started, so a new rate never changes older charges.
 
-## Card
+**Fixing trips.** Open a trip for **Split at the stop** (two drives logged as one, for example after the car lost signal in an underground car park), **Merge with next trip**, or **Delete this trip**.
 
-Registered automatically as a dashboard resource (and updated on each version); nothing to add by hand.
+**Monthly summary** (optional, in the car's options): last month's trips, distance, energy, charging and idle drain, sent on the 1st at 09:00 as a Home Assistant notification or through any notify service. The **Send monthly summary** action sends it now.
+
+<details>
+<summary>Dashboard card</summary>
+
+The card is registered as a dashboard resource automatically; add it from the card picker or in YAML:
 
 ```yaml
 type: custom:mb-logbook-card
-period: month     # week, month, quarter or year (use the arrows to step back)
+period: month     # week, month, quarter or year
 # car: EQS        # optional: lock the card to one car (by name)
 ```
+</details>
 
-Click a trip to show its route. Click **unnamed · name it** next to a start or end to name that place (admins only). On the map, drag the pin to move the place and drag the circle's edge to resize it; the Places tab lets you adjust existing places the same way.
+<details>
+<summary>Sensors (per car)</summary>
 
-## Sensors (per car)
+| Sensor | |
+|---|---|
+| Trips, distance, energy used, efficiency | This month |
+| Last trip distance, energy, efficiency | With from, to and battery as attributes |
+| Idle drain | % per day lost while parked (uncharged parks of 6 h or more, last 30 days) |
+| Last charge energy and cost | |
+| Charged, charging cost | This month |
+| Trip in progress, charging session | Binary sensors |
+</details>
 
-Trips, distance, energy and efficiency this month; last trip distance, energy and efficiency; idle drain (% per day: battery lost over time parked, across uncharged parks of 6 h or more in the last 30 days); last charge energy and cost; energy charged and charging cost this month; trip in progress; charging session.
+<details>
+<summary>Actions</summary>
 
-## How trips are detected
+- **Import history**: rebuild trips and charges from Home Assistant's recorded history for the time before the car was added. It runs once automatically; re-running replaces only imported rows, never live ones.
+- **Send monthly summary**: send last month's summary now.
+</details>
 
-A trip starts when the ignition leaves "off" and ends when it has been off for a few minutes (3 by default). Without an ignition sensor, a trip starts when the car moves (odometer or trip counter going up, or a position jump of 200 m or more) and ends after the same few minutes without movement. Distance comes from the car's 0.1-resolution "distance since start" counter, checked against the odometer (which may only report whole miles). Ignition events that don't move the car (for example pre-conditioning) are ignored. The data is stored in `config/mb_logbook.db` (SQLite) and is included in Home Assistant backups.
+<details>
+<summary>How trips are detected</summary>
+
+A trip starts when the ignition leaves "off" and ends when it has been off for a few minutes (3 by default). If the car stops moving for 30 minutes while its ignition still says "on" (it can lose signal before reporting the ignition off), the trip ends at the last movement and the next drive starts a new one.
+
+Without an ignition sensor, a trip starts when the car moves (odometer or trip counter up, or a position jump of 200 m or more) and ends after the same few minutes without movement.
+
+Distance comes from the car's 0.1-resolution "distance since start" counter, checked against the odometer. Ignition events that don't move the car, such as pre-conditioning, are ignored.
+
+Data is stored in `config/mb_logbook.db` (SQLite), which is included in Home Assistant backups.
+</details>
+
+## Privacy
+
+Everything stays in Home Assistant. Places are named from your own zones and the places you name. The one exception is optional: **Suggest names** sends the single point you are naming to OpenStreetMap's Photon service (falling back to the Overpass API), only when you press it. Route maps use Home Assistant's own map component and tiles.
 
 ## Limits
 
 - Mercedes reports battery % in whole numbers, so kWh for short trips is approximate (1% of a large battery is about 1 kWh).
 - The car sends its position about every two minutes while driving, so routes are drawn point to point.
 
-## License
+## Contributing
 
-MIT
+Bug reports and ideas are welcome in [Issues](https://github.com/david40i9/ha-mercedes-ev-logbook/issues). Planned work is in [TODO.md](TODO.md).
+
+---
+
+**Not affiliated with Mercedes-Benz.** This is an independent community project. Mercedes-Benz and EQ are trademarks of Mercedes-Benz Group AG, used here only to say which cars it works with. Licensed under the [MIT licence](LICENSE).
