@@ -40,7 +40,7 @@ from .const import (
     UNKNOWN_STATES,
 )
 from . import rules
-from .logger import MOVE_TRIGGER_M, CarLogger, _moved_m, _num, _to_km
+from .logger import MOVE_TRIGGER_M, STALE_MINUTES, CarLogger, _moved_m, _num, _to_km
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -112,6 +112,7 @@ class _Replay:
             "start_place": self._place(lat, lon)[0],
             "points": [[round(ts), lat, lon]] if pos else [],
             "last_fix": pos[2] if pos else None,
+            "moved_ts": ts,
             **rules.park_fields(self.park, ts, soc),
         }
 
@@ -230,9 +231,25 @@ class _Replay:
             self.end_trip()
         if self.charge and "off_ts" in self.charge and ts >= self.charge["off_ts"] + CHARGE_GAP_MINUTES * 60:
             self.end_charge()
+        c = self.conf
+        if (
+            c.get(CONF_IGNITION) and self.trip and "off_ts" not in self.trip
+            and ts - self.trip["moved_ts"] >= STALE_MINUTES * 60
+        ):
+            # Ignition stuck on with the car still (lost signal): the live stale check.
+            self.trip["off_ts"] = self.trip["moved_ts"]
+            self.end_trip()
         old = self.cur.get(eid)
         self.cur[eid] = st
-        c = self.conf
+        if c.get(CONF_IGNITION) and (
+            (eid == c[CONF_TRACKER] and _moved_m(old, st) >= MOVE_TRIGGER_M)
+            or (eid == c.get(CONF_TRIP_DISTANCE) and (_num(st) or 0) > (_num(old) or 0))
+        ):
+            ign = self.cur.get(c[CONF_IGNITION])
+            if self.trip is None and ign is not None and ign.state not in IGNITION_OFF and ign.state not in UNKNOWN_STATES:
+                self.start_trip(ts)
+            if self.trip is not None:
+                self.trip["moved_ts"] = ts
         if not c.get(CONF_IGNITION):
             # No ignition sensor: the same movement rules as the live logger.
             moved, odo_before = False, None
@@ -268,6 +285,7 @@ class _Replay:
             if not pts or pts[-1][1:] != [pos[0], pos[1]]:
                 pts.append([round(ts), pos[0], pos[1]])
                 self.trip["last_fix"] = pos[2]
+                self.trip["moved_ts"] = ts
         elif eid == c.get(CONF_TRIP_DISTANCE):
             if self.trip is None:
                 return

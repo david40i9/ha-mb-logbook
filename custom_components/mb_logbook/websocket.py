@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import time
+from datetime import timedelta
 from typing import Any
 
 import aiohttp
@@ -22,6 +23,9 @@ from .const import (
     CONF_CHARGER_ENERGY,
     CONF_DISTANCE_UNIT,
     CONF_HOME_ZONE,
+    CONF_ODOMETER,
+    CONF_RANGE,
+    CONF_SOC,
     DOMAIN,
     IDLE_MIN_HOURS,
     SIGNAL_UPDATED,
@@ -30,6 +34,7 @@ from .const import (
     entry_conf,
 )
 from .db import distance_m
+from .logger import _num, _to_km
 
 
 def _entries(hass: HomeAssistant) -> dict[str, Any]:
@@ -54,6 +59,7 @@ def async_register_websocket(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_trip_points)
     websocket_api.async_register_command(hass, ws_charges)
     websocket_api.async_register_command(hass, ws_delete_trip)
+    websocket_api.async_register_command(hass, ws_split_trip)
     websocket_api.async_register_command(hass, ws_suggest_names)
     websocket_api.async_register_command(hass, ws_trip_label)
     websocket_api.async_register_command(hass, ws_labels)
@@ -565,3 +571,91 @@ async def ws_delete_trip(hass: HomeAssistant, connection, msg: dict[str, Any]) -
     await hass.async_add_executor_job(db.delete_trip, msg["trip_id"])
     _refresh_all(hass)  # month totals and last-trip sensors
     connection.send_result(msg["id"], {"deleted": msg["trip_id"]})
+
+
+# A gap this long between route points with the car still is a park the car
+# never reported (e.g. no signal underground, so the ignition stayed "on").
+SPLIT_GAP_S = 20 * 60
+
+
+def _states_at(hass: HomeAssistant, ts: float, ids: list[str]) -> dict[str, Any]:
+    """Each entity's recorded state at a moment."""
+    from homeassistant.components.recorder import history  # noqa: PLC0415
+
+    when = dt_util.utc_from_timestamp(ts)
+    found = history.get_significant_states(
+        hass, when, when + timedelta(seconds=1), ids,
+        include_start_time_state=True, significant_changes_only=False, no_attributes=False,
+    )
+    return {eid: rows[0] for eid, rows in found.items() if rows}
+
+
+def _path_km(pts: list) -> float:
+    return sum(
+        distance_m(a[1], a[2], b[1], b[2]) for a, b in zip(pts, pts[1:])
+        if None not in (a[1], a[2], b[1], b[2])
+    ) / 1000
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/split_trip", vol.Required("trip_id"): int}
+)
+@websocket_api.async_response
+async def ws_split_trip(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
+    """Split a trip at its longest stop: two drives the car reported as one."""
+    from homeassistant.components.recorder import get_instance  # noqa: PLC0415
+
+    db = hass.data[DOMAIN]["db"]
+    trip = await hass.async_add_executor_job(db.raw_trip, msg["trip_id"])
+    if trip is None:
+        connection.send_error(msg["id"], "not_found", "Trip not found")
+        return
+    pts = trip["points"]
+    gaps = [(pts[i + 1][0] - pts[i][0], i) for i in range(len(pts) - 1)]
+    gap, i = max(gaps, default=(0, 0))
+    if gap < SPLIT_GAP_S:
+        connection.send_error(msg["id"], "no_stop", "No stop of 20 minutes or more in this trip's route.")
+        return
+    logger = next(
+        (e.runtime_data for e in _entries(hass).values() if e.runtime_data.car_id == trip["car"]), None
+    )
+    t1, t2 = pts[i][0], pts[i + 1][0]
+    lat, lon = pts[i][1], pts[i][2]
+    vals: dict[str, dict[str, float | None]] = {"t1": {}, "t2": {}}
+    if logger is not None:
+        conf = logger.conf
+        keys = {k: conf.get(k) for k in (CONF_SOC, CONF_ODOMETER, CONF_RANGE) if conf.get(k)}
+        for tag, ts in (("t1", t1), ("t2", t2)):
+            states = await get_instance(hass).async_add_executor_job(
+                _states_at, hass, ts, list(keys.values())
+            )
+            for k, eid in keys.items():
+                v = _num(states.get(eid))
+                vals[tag][k] = v if k == CONF_SOC else _to_km(v, states.get(eid))
+    place = logger._place(lat, lon)[0] if logger is not None else None
+    # Distance: shared by route length, unless the odometer says better.
+    d1, d2 = _path_km(pts[: i + 1]), _path_km(pts[i + 1 :])
+    total = trip["distance_km"] or 0.0
+    km1 = total * d1 / (d1 + d2) if d1 + d2 else total / 2
+    odo1 = vals["t1"].get(CONF_ODOMETER)
+    if odo1 is not None and trip["odo_start_km"] is not None and 0 < odo1 - trip["odo_start_km"] < total:
+        km1 = odo1 - trip["odo_start_km"]
+    soc1, soc2 = vals["t1"].get(CONF_SOC), vals["t2"].get(CONF_SOC)
+    leg1 = {
+        **trip, "end_ts": t1, "odo_end_km": odo1, "distance_km": round(km1, 3),
+        "soc_end": soc1, "range_end_km": vals["t1"].get(CONF_RANGE),
+        "end_lat": lat, "end_lon": lon, "end_place": place, "points": pts[: i + 1],
+    }
+    leg2 = {
+        **trip, "start_ts": t2, "odo_start_km": vals["t2"].get(CONF_ODOMETER) or odo1,
+        "distance_km": round(total - km1, 3), "soc_start": soc2,
+        "range_start_km": vals["t2"].get(CONF_RANGE), "start_lat": lat, "start_lon": lon,
+        "start_place": place, "points": [[t2, lat, lon], *pts[i + 1 :]],
+        "park_hours": round(gap / 3600, 2), "park_drain_hours": round(gap / 3600, 2),
+        "park_soc_drop": soc1 - soc2 if soc1 is not None and soc2 is not None else None,
+        "park_charged": False,
+    }
+    await hass.async_add_executor_job(db.replace_trip, msg["trip_id"], [leg1, leg2])
+    _refresh_all(hass)
+    connection.send_result(msg["id"], {"split_at": t1, "resumed": t2})

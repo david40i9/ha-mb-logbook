@@ -684,7 +684,7 @@ class MBLogbookCard extends HTMLElement {
             <td class=n>${this._eff(x.distance_km, kwh)}</td>
             <td class=n>${park}</td>
             <td class=n>${x.point_count > 1 ? "🗺" : ""}</td>
-          </tr>${open ? `<tr class=maprow><td colspan=9>${form}<div id=mapbox></div>${this._hass.user?.is_admin && !naming ? `<div class=tripactions><button class=deltrip data-id="${x.id}">Delete this trip</button></div>` : ""}</td></tr>` : ""}`;
+          </tr>${open ? `<tr class=maprow><td colspan=9>${form}<div id=mapbox></div>${this._hass.user?.is_admin && !naming ? `<div class=tripactions>${x.end_ts - x.start_ts >= 2400 ? `<button class=splittrip data-id="${x.id}" title="For two drives logged as one: splits at the longest stop">Split at the stop</button> ` : ""}<button class=deltrip data-id="${x.id}">Delete this trip</button></div>` : ""}</td></tr>` : ""}`;
       })
       .join("");
   }
@@ -899,6 +899,19 @@ class MBLogbookCard extends HTMLElement {
         this._render();
       });
     });
+    root.querySelectorAll("button.splittrip").forEach((b) =>
+      b.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        if (!confirm("Split this trip in two at its longest stop? Use this when two drives were logged as one.")) return;
+        try {
+          await this._hass.callWS({ type: "mb_logbook/split_trip", trip_id: Number(b.dataset.id) });
+        } catch (e) {
+          alert(`Couldn't split the trip: ${e.message || e.code || e}`);
+          return;
+        }
+        await this._load();
+      })
+    );
     root.querySelectorAll("button.deltrip").forEach((b) =>
       b.addEventListener("click", async (ev) => {
         ev.stopPropagation();
@@ -1099,7 +1112,7 @@ MBLogbookCard.css = `
   #mapbox ha-map { height: 100%; display: block; }
 `;
 
-const CARD_VERSION = "0.14.0";
+const CARD_VERSION = "0.15.0";
 
 if (!customElements.get("mb-logbook-card")) {
   customElements.define("mb-logbook-card", MBLogbookCard);

@@ -434,6 +434,32 @@ class LogbookDB:
             for r in rows
         ]
 
+    def raw_trip(self, trip_id: int) -> dict[str, Any] | None:
+        """A trip row as stored (points decoded, no place names applied)."""
+        rows = self._exec("SELECT * FROM trips WHERE id = ?", (trip_id,))
+        if not rows:
+            return None
+        d = dict(rows[0])
+        d["points"] = json.loads(d["points"] or "[]")
+        return d
+
+    def replace_trip(self, trip_id: int, legs: list[dict[str, Any]]) -> None:
+        """Swap one trip for several (a split), in one transaction."""
+        rows = []
+        for t in legs:
+            row = dict(t)
+            row["points"] = json.dumps(row.get("points") or [])
+            row["park_charged"] = 1 if row.get("park_charged") else 0
+            rows.append(tuple(row.get(c) for c in TRIP_COLS))
+        with self._lock:
+            assert self._conn is not None
+            with self._conn:
+                self._conn.execute("DELETE FROM trips WHERE id = ?", (trip_id,))
+                self._conn.executemany(
+                    f"INSERT INTO trips ({', '.join(TRIP_COLS)}) VALUES ({', '.join('?' for _ in TRIP_COLS)})",
+                    rows,
+                )
+
     def delete_trip(self, trip_id: int) -> None:
         self._exec("DELETE FROM trips WHERE id = ?", (trip_id,))
 

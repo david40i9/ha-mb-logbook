@@ -72,6 +72,10 @@ def _num(state: State | None) -> float | None:
 
 # Without an ignition sensor, a position jump this big counts as the car moving.
 MOVE_TRIGGER_M = 200.0
+# With an ignition sensor: no movement for this long ends the trip anyway. The car
+# can lose signal before it reports ignition off (underground car parks), leaving
+# the ignition stuck on until the next drive.
+STALE_MINUTES = 30
 
 
 def _moved_m(old: State | None, new: State | None) -> float:
@@ -105,6 +109,7 @@ class CarLogger:
         self._state: dict[str, Any] = {}
         self._unsubs: list = []
         self._end_timer = None
+        self._stale_timer = None
         self._charge_end_timer = None
 
     # ----- public state used by entities -------------------------------------------
@@ -183,7 +188,7 @@ class CarLogger:
         for unsub in self._unsubs:
             unsub()
         self._unsubs.clear()
-        for timer in (self._end_timer, self._charge_end_timer):
+        for timer in (self._end_timer, self._stale_timer, self._charge_end_timer):
             if timer:
                 timer()
         await self._store.async_save(self._state)
@@ -207,6 +212,8 @@ class CarLogger:
                 self._schedule_trip_end(0)
             elif not self._state.get("trip") and self._ignition_on(ign):
                 self._start_trip()
+            elif self._state.get("trip"):
+                self._watch_stale()
         elif self._state.get("trip"):
             # Movement mode: wait out the stop time from the last movement seen.
             trip = self._state["trip"]
@@ -294,14 +301,14 @@ class CarLogger:
         if entity_id == self.conf.get(CONF_IGNITION):
             self._on_ignition(new)
         elif entity_id == self.conf[CONF_TRACKER]:
-            if moving_mode and _moved_m(old, new) >= MOVE_TRIGGER_M:
-                self._on_movement()
+            if _moved_m(old, new) >= MOVE_TRIGGER_M:
+                self._on_movement() if moving_mode else self._on_drive()
             self._on_position()
         elif entity_id == self.conf.get(CONF_CHARGING):
             self._on_charging(new)
         elif entity_id == self.conf.get(CONF_TRIP_DISTANCE):
-            if moving_mode and (_num(new) or 0) > (_num(old) or 0):
-                self._on_movement()
+            if (_num(new) or 0) > (_num(old) or 0):
+                self._on_movement() if moving_mode else self._on_drive()
             self._on_counter()
         elif moving_mode and entity_id == self.conf[CONF_ODOMETER]:
             before, after = _num(old), _num(new)
@@ -318,6 +325,44 @@ class CarLogger:
         self._save()
         stop = self.conf.get(CONF_STOP_MINUTES, DEFAULT_STOP_MINUTES)
         self._schedule_trip_end(stop * 60)
+
+    @callback
+    def _on_drive(self) -> None:
+        """Ignition mode: the car moved. Restart a trip the stale check closed."""
+        if self._state.get("trip") is None:
+            ign = self.hass.states.get(self.conf[CONF_IGNITION])
+            if not self._ignition_on(ign):
+                return
+            self._start_trip()
+        self._state["trip"]["moved_ts"] = time.time()
+        self._watch_stale()
+
+    @callback
+    def _watch_stale(self) -> None:
+        """(Re)arm the no-movement check for an ignition-mode trip."""
+        if self._stale_timer:
+            self._stale_timer()
+            self._stale_timer = None
+        trip = self._state.get("trip")
+        if trip is None or not self.conf.get(CONF_IGNITION):
+            return
+        due = trip.get("moved_ts", trip["start_ts"]) + STALE_MINUTES * 60 - time.time()
+
+        @callback
+        def _fire(_now) -> None:
+            self._stale_timer = None
+            t = self._state.get("trip")
+            if t is None or "off_ts" in t:
+                return
+            last = t.get("moved_ts", t["start_ts"])
+            if time.time() - last < STALE_MINUTES * 60 - 1:
+                self._watch_stale()
+                return
+            _LOGGER.info("%s: no movement for %d min with the ignition on; ending the trip", self.car_id, STALE_MINUTES)
+            t["off_ts"] = last
+            self.hass.async_create_task(self._async_end_trip())
+
+        self._stale_timer = async_call_later(self.hass, timedelta(seconds=max(1.0, due)), _fire)
 
     @callback
     def _on_counter(self) -> None:
@@ -384,10 +429,12 @@ class CarLogger:
             "start_place": place,
             "points": [[round(now), lat, lon]] if pos else [],
             "last_fix": pos[2] if pos else None,
+            "moved_ts": now,
             **rules.park_fields(self._state.get("park"), now, soc),
         }
         self._save()
         self._notify()
+        self._watch_stale()
 
     @callback
     def _on_position(self) -> None:
@@ -403,7 +450,9 @@ class CarLogger:
             return
         pts.append([round(time.time()), lat, lon])
         trip["last_fix"] = fix
+        trip["moved_ts"] = time.time()
         self._save()
+        self._watch_stale()
 
     async def _async_end_trip(self) -> None:
         trip = self._state.get("trip")
