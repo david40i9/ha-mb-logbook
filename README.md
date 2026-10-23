@@ -1,6 +1,6 @@
-# MB Logbook
+# Mercedes EV Logbook
 
-A Home Assistant integration that keeps a permanent logbook for Mercedes-Benz electric cars:
+A Home Assistant integration that keeps a permanent trip logbook for Mercedes-Benz electric cars (EQA, EQB, EQE, EQS, EQV, the electric CLA and others) — a mileage log, charging log and battery tracker in one:
 
 - **Trips**: start and end time, distance, battery used, kWh and efficiency, start and end place, and the route.
 - **Parked drain**: how much battery each car lost while parked between trips (parks that included a charge are marked, not counted).
@@ -13,6 +13,8 @@ A Home Assistant integration that keeps a permanent logbook for Mercedes-Benz el
 It reads the entities of the [mbapi2020](https://github.com/ReneNulschDE/mbapi2020) integration (any car that exposes an odometer, battery %, ignition state and GPS tracker works). It does not talk to Mercedes itself.
 
 **Privacy:** everything stays in Home Assistant. Places are named from your own Home Assistant zones and your own named places; there is no automatic address lookup. The one exception is optional: when naming a place you can press **Suggest names**, which looks up named shops and venues near the pin in OpenStreetMap data (Photon by Komoot, falling back to the Overpass API). That sends only that one point, only when you press it. The route map is Home Assistant's built-in map component, which loads the same map tiles as the standard map card.
+
+**Not affiliated with Mercedes-Benz.** This is an independent, community project. Mercedes-Benz and EQ are trademarks of Mercedes-Benz Group AG, used here only to say which cars it works with.
 
 ## Status
 
@@ -33,7 +35,11 @@ Early development (0.x). Expect changes.
 - **Charging rates** (set in the card): a fixed price per kWh, or free, for any other place you charge.
 ## Install
 
-Copy `custom_components/mb_logbook` into your `config/custom_components` folder and restart Home Assistant. Then go to **Settings → Devices & services → Add integration → MB Logbook** and pick your car.
+**HACS:** add `https://github.com/david40i9/ha-mercedes-ev-logbook` as a custom repository (type: Integration), download **Mercedes EV Logbook** and restart Home Assistant.
+
+**Manual:** copy `custom_components/mb_logbook` into your `config/custom_components` folder and restart Home Assistant.
+
+Then go to **Settings → Devices & services → Add integration → Mercedes EV Logbook** and pick your car.
 
 ## Setup
 
@@ -43,14 +49,27 @@ Copy `custom_components/mb_logbook` into your `config/custom_components` folder 
 
 ## Existing history
 
-When a car is added, MB Logbook rebuilds its earlier trips and charges from Home Assistant's recorded history (as far back as your recorder keeps it), using the same rules as live logging. Run the **MB Logbook: Import history** action to do it again; it only replaces previously imported rows, never live ones.
+When a car is added, Mercedes EV Logbook rebuilds its earlier trips and charges from Home Assistant's recorded history (as far back as your recorder keeps it), using the same rules as live logging. Run the **Mercedes EV Logbook: Import history** action to do it again; it only replaces previously imported rows, never live ones.
 
 ## Sidebar page
 
-MB Logbook adds an **MB Logbook** page to the sidebar:
+Mercedes EV Logbook adds a **Mercedes EV Logbook** page to the sidebar:
 
-- **Overview**: mileage by trip label (Business first) for any week, month, 3 months or year, with arrows to step back; this month's trips, distance, energy, efficiency, charging and idle drain against last month; 12-month charts of distance, energy used vs charged, charging cost and efficiency; a map of this month's routes; your most-visited places.
-- **Logbook**: the full logbook (trips, charging, places) for the selected car.
+- **Overview**: mileage by trip label (Business first) with a business-mileage chart, for any week, month, 3 months or year, with arrows to step back; this month's trips, distance, energy, efficiency, charging and idle drain against last month; 12-month charts of distance, energy used vs charged, charging cost and efficiency; **battery health** (the range the car predicts at 100%, month by month); **efficiency vs outside temperature**; a map of this month's routes; your most-visited places.
+- **Logbook**: the full logbook (trips, charging, places) for the selected car. Every table sorts by any column.
+
+Outside temperature comes from Home Assistant's own weather for your home location (or a temperature sensor you choose in the car's options). Each trip stores it when it starts.
+
+## Fixing trips
+
+- **Split at the stop**: two drives logged as one (for example the car lost signal in an underground car park before it reported the ignition off) are split at the longest stop. With an ignition sensor, 30 minutes without movement also ends a trip automatically.
+- **Merge with next trip**: one drive logged as two.
+- **Delete this trip**: for bogus trips.
+
+## Exports and summary
+
+- Trips and charging sessions export as CSV from their tabs.
+- Optional **monthly summary** (set in the car's options): last month's trips, distance, energy, charging and idle drain, sent on the 1st at 09:00 as a Home Assistant notification or through any notify service. The **Send monthly summary** action sends it now.
 
 ## Card
 

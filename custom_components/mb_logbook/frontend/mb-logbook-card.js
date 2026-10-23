@@ -1,4 +1,4 @@
-/* MB Logbook card: trips (with route map), parked drain and charging sessions.
+/* Mercedes EV Logbook card: trips (with route map), parked drain and charging sessions.
  * Data comes from the mb_logbook WebSocket API; the map is Home Assistant's own
  * <ha-map>, so it uses the same map tiles as HA's map card and nothing else. */
 
@@ -91,7 +91,7 @@ class MBLogbookCard extends HTMLElement {
     try {
       this._cars = await this._hass.callWS({ type: "mb_logbook/cars" });
     } catch (e) {
-      this._error = "MB Logbook isn't loaded.";
+      this._error = "Mercedes EV Logbook isn't loaded.";
       this._render();
       return;
     }
@@ -1164,15 +1164,15 @@ MBLogbookCard.css = `
   #mapbox ha-map { height: 100%; display: block; }
 `;
 
-const CARD_VERSION = "0.17.2";
+const CARD_VERSION = "0.18.0";
 
 if (!customElements.get("mb-logbook-card")) {
   customElements.define("mb-logbook-card", MBLogbookCard);
-  console.info(`%c MB-LOGBOOK-CARD %c ${CARD_VERSION} `, "background:#89b4fa;color:#1e1e2e;font-weight:600", "background:#313244;color:#cdd6f4");
+  console.info(`%c MERCEDES-EV-LOGBOOK-CARD %c ${CARD_VERSION} `, "background:#89b4fa;color:#1e1e2e;font-weight:600", "background:#313244;color:#cdd6f4");
   window.customCards = window.customCards || [];
   window.customCards.push({
     type: "mb-logbook-card",
-    name: "MB Logbook",
-    description: "Trips, route maps, parked drain and charging sessions from MB Logbook.",
+    name: "Mercedes EV Logbook",
+    description: "Trips, route maps, parked drain and charging sessions from Mercedes EV Logbook.",
   });
 }

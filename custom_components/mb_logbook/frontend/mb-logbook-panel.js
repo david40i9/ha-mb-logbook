@@ -1,4 +1,4 @@
-/* MB Logbook sidebar page: an overview (month figures, 12-month charts, this
+/* Mercedes EV Logbook sidebar page: an overview (month figures, 12-month charts, this
  * month's routes, most-visited places) and the full logbook card.
  * Charts are plain SVG and the map is Home Assistant's own <ha-map>; nothing
  * is loaded from outside Home Assistant. */
@@ -112,8 +112,8 @@ class MBLogbookPanel extends HTMLElement {
       .map(([v, l]) => `<button data-view="${v}" class="${v === this._view ? "on" : ""}">${l}</button>`)
       .join("")}</div>`;
     root.innerHTML = `<style>${MBLogbookPanel.css}</style>
-      <div class=toolbar><span id=menu></span><div class=apptitle>MB Logbook${this._car ? ` · ${escp(this._car.name)}` : ""}</div>${cars}${views}</div>
-      <div class=content id=content>${this._car ? "" : `<div class=empty>No cars set up yet. Add one under Settings → Devices &amp; services → MB Logbook.</div>`}</div>`;
+      <div class=toolbar><span id=menu></span><div class=apptitle>Mercedes EV Logbook${this._car ? ` · ${escp(this._car.name)}` : ""}</div>${cars}${views}</div>
+      <div class=content id=content>${this._car ? "" : `<div class=empty>No cars set up yet. Add one under Settings → Devices &amp; services → Mercedes EV Logbook.</div>`}</div>`;
 
     this._menu = document.createElement("ha-menu-button");
     this._menu.hass = this._hass;
@@ -376,7 +376,7 @@ class MBLogbookPanel extends HTMLElement {
     }
     if (this._car !== car) return;
     if (!res.source) {
-      box.querySelector(".dim").textContent = "No weather entity found. Add a weather integration, or choose a temperature sensor in the car's options (Settings → Devices & services → MB Logbook → Configure).";
+      box.querySelector(".dim").textContent = "No weather entity found. Add a weather integration, or choose a temperature sensor in the car's options (Settings → Devices & services → Mercedes EV Logbook → Configure).";
       return;
     }
     const bands = res.bands.filter((b) => b.trips);

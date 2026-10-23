@@ -1,14 +1,14 @@
 {
   "domain": "mb_logbook",
-  "name": "MB Logbook",
+  "name": "Mercedes EV Logbook",
   "codeowners": ["@david40i9"],
   "config_flow": true,
   "dependencies": ["http", "frontend", "lovelace", "panel_custom", "recorder", "websocket_api", "zone"],
   "after_dependencies": ["mbapi2020"],
-  "documentation": "https://github.com/david40i9/ha-mb-logbook",
+  "documentation": "https://github.com/david40i9/ha-mercedes-ev-logbook",
   "integration_type": "device",
   "iot_class": "calculated",
-  "issue_tracker": "https://github.com/david40i9/ha-mb-logbook/issues",
+  "issue_tracker": "https://github.com/david40i9/ha-mercedes-ev-logbook/issues",
   "requirements": [],
-  "version": "0.17.2"
+  "version": "0.18.0"
 }

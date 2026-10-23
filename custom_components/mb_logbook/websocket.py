@@ -1,4 +1,4 @@
-"""WebSocket API used by the MB Logbook card."""
+"""WebSocket API used by the Mercedes EV Logbook card."""
 
 from __future__ import annotations
 
@@ -89,7 +89,7 @@ PHOTON_URL = "https://photon.komoot.io/reverse"
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 # Things worth naming a stop after: shops, cafés, car parks, chargers, stations...
 POI_KEYS = "shop|amenity|tourism|leisure|office|craft|healthcare|railway|public_transport|club|sport|aeroway"
-USER_AGENT = f"MB-Logbook/{VERSION} (Home Assistant integration)"
+USER_AGENT = f"Mercedes-EV-Logbook/{VERSION} (Home Assistant integration)"
 # UK-style postcodes (and bare outward codes) that sometimes come back as names.
 POSTCODE_RE = re.compile(r"^[A-Z]{1,2}\d[A-Z\d]?(\s*\d[A-Z]{2})?$", re.IGNORECASE)
 LOOKUP_TIMEOUT = aiohttp.ClientTimeout(total=10)

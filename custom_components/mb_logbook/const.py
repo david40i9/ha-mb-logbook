@@ -1,9 +1,9 @@
-"""Constants for MB Logbook."""
+"""Constants for Mercedes EV Logbook."""
 
 from __future__ import annotations
 
 DOMAIN = "mb_logbook"
-VERSION = "0.17.2"
+VERSION = "0.18.0"
 
 DB_FILENAME = "mb_logbook.db"
 STORAGE_VERSION = 1

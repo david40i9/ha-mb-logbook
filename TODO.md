@@ -1,6 +1,6 @@
 # To do
 
-Ideas and planned work for MB Logbook. Not in any order yet.
+Ideas and planned work for Mercedes EV Logbook. Not in any order yet.
 
 ## Card and page
 
@@ -15,7 +15,7 @@ Ideas and planned work for MB Logbook. Not in any order yet.
 
 ## Ideas (from other EV loggers)
 
-Ranked by value for effort, keeping MB Logbook local-only and multi-car.
+Ranked by value for effort, keeping Mercedes EV Logbook local-only and multi-car.
 
 1. ~~**Export trips and charges to CSV**~~ (trips 0.11, charges 0.16), filtered by period, car and place — for mileage claims and expenses. *(Tessie and TeslaFi exports; Tessie users use them for tax-time mileage.)*
 2. ~~**Business / personal tagging**~~ (labels 0.11, default label per place 0.12) on trips (with a default per place, e.g. trips to work), and a mileage summary per tag. *(TeslaFi / Tessie trip classification.)*
@@ -28,7 +28,7 @@ Ranked by value for effort, keeping MB Logbook local-only and multi-car.
 9. **Visited places map / timeline**: all trip ends as a heat map, and a day-by-day timeline. *(TeslaMate "visited" dashboard.)*
 10. ~~**Monthly summary notification**~~ (0.16) (opt-in): last month's miles, energy, cost and drain.
 11. **Charging curve** for rapid charges: store power samples during a session and plot power vs battery %. *(TeslaMate charge detail.)* Needs more frequent data than the car may send.
-12. *Considered, not planned:* sending live data to A Better Route Planner — useful for some, but it sends location and battery data to an outside service, against MB Logbook's local-only aim. Could only ever be an opt-in, off by default.
+12. *Considered, not planned:* sending live data to A Better Route Planner — useful for some, but it sends location and battery data to an outside service, against Mercedes EV Logbook's local-only aim. Could only ever be an opt-in, off by default.
 
 ## Done
 

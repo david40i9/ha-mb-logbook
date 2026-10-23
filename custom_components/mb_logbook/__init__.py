@@ -1,4 +1,4 @@
-"""MB Logbook: trips, parked drain and charging sessions for Mercedes EVs.
+"""Mercedes EV Logbook: trips, parked drain and charging sessions for Mercedes EVs.
 
 Reads the entities of the mbapi2020 integration (or any car exposing an
 odometer, battery %, ignition and GPS tracker) and keeps a permanent local
@@ -67,7 +67,7 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
         webcomponent_name="mb-logbook-panel",
         frontend_url_path=PANEL_PATH,
         module_url=f"{STATIC_URL}/mb-logbook-panel.js?v={VERSION}",
-        sidebar_title="MB Logbook",
+        sidebar_title="Mercedes EV Logbook",
         sidebar_icon="mdi:notebook-outline",
         require_admin=False,
         embed_iframe=False,

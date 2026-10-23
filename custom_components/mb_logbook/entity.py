@@ -10,7 +10,7 @@ from .const import CONF_CAR_NAME, DOMAIN, SIGNAL_UPDATED, VERSION, entry_conf
 
 
 class LogbookEntity(Entity):
-    """Base class for MB Logbook entities."""
+    """Base class for Mercedes EV Logbook entities."""
 
     _attr_has_entity_name = True
     _attr_should_poll = False
@@ -23,7 +23,7 @@ class LogbookEntity(Entity):
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._logger.car_id)},
             name=f"{entry_conf(entry)[CONF_CAR_NAME]} logbook",
-            manufacturer="MB Logbook",
+            manufacturer="Mercedes EV Logbook",
             sw_version=VERSION,
         )
 
