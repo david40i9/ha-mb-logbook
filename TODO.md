@@ -42,3 +42,4 @@ Ideas and planned work for Mercedes EV Logbook. Ranked roughly by value for effo
 - [x] Two cars on one home charger meter: the meter is split between the cars charging at home by their charging power, never counted twice (0.21)
 - [x] Without a charger meter, home kWh and costs come from the car's charging power over the session instead of battery % (0.22)
 - [x] "Where you go" heat map of trip ends on the overview; battery size pre-filled from the car model at setup (0.23)
+- [x] Rename cars under Configure; heat map grouped by place with log weighting so busy places don't drown out the rest (0.24)

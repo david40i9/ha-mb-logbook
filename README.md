@@ -52,6 +52,10 @@ It builds on the [MercedesME 2020 (mbapi2020)](https://github.com/ReneNulschDE/m
 
 <img src="https://raw.githubusercontent.com/david40i9/ha-mercedes-ev-logbook/main/docs/images/name-place.png" alt="Naming a place: map with a resizable circle and suggested business names">
 
+**Where you go:** a heat map of every stop, for a month, 3 months, a year or all time. Places you visit most glow hottest.
+
+<img src="https://raw.githubusercontent.com/david40i9/ha-mercedes-ev-logbook/main/docs/images/heatmap.png" alt="Heat map of stops on the overview page (demo data)">
+
 **Charging:** sessions with energy, peak power and cost, and charging rates per place (here Home with an off-peak window) with their history.
 
 <img src="https://raw.githubusercontent.com/david40i9/ha-mercedes-ev-logbook/main/docs/images/charging.png" alt="Charging tab">
@@ -114,6 +118,8 @@ Any car that provides these entities works, not only Mercedes. Pick them yoursel
 **Charging rates.** Give any charging place, Home included, a price per kWh (or mark it free) from a date, with an optional off-peak price and time window for EV tariffs (for example 7p from 00:30 to 05:30). Each charge is costed at the rate in force when it started, split by how much of it fell in the off-peak window, so a new rate never changes older charges. No price sensor or energy integration is needed. Costs are shown in the currency chosen in the car's options.
 
 **Fixing trips.** Open a trip for **Split at the stop** (two drives logged as one, for example after the car lost signal in an underground car park), **Merge with next trip**, or **Delete this trip**.
+
+**Several cars.** Add each car as its own entry; the card and page get a car switcher. Rename a car (for example to "Sam's CLA") under **Configure**: the name shows in the switcher, the device and its sensors, while entity IDs stay the same. Cars on the same home charger meter share it by charging power, never counted twice.
 
 **Monthly summary** (optional, in the car's options): last month's trips, distance, energy, charging and idle drain, sent on the 1st at 09:00 as a Home Assistant notification or through any notify service. The **Send monthly summary** action sends it now.
 

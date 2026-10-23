@@ -481,9 +481,24 @@ class MBLogbookPanel extends HTMLElement {
       hb.innerHTML = `<div class=empty>The heat map needs Home Assistant's newer map (MapLibre), which this browser or version isn't using.</div>`;
       return;
     }
+    // Group stops into ~100 m squares weighted by log(visits), so a place visited 90
+    // times is hot without drowning out one visited 10 times or once.
+    const cells = new Map();
+    for (const [lat, lon] of pts) {
+      const k = `${Math.round(lat * 1000)},${Math.round(lon * 700)}`;
+      const c = cells.get(k) || { n: 0, lat: 0, lon: 0 };
+      c.n += 1;
+      c.lat += lat;
+      c.lon += lon;
+      cells.set(k, c);
+    }
     const data = {
       type: "FeatureCollection",
-      features: pts.map(([lat, lon]) => ({ type: "Feature", geometry: { type: "Point", coordinates: [lon, lat] }, properties: {} })),
+      features: [...cells.values()].map((c) => ({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [c.lon / c.n, c.lat / c.n] },
+        properties: { w: 1 + Math.log(c.n) },
+      })),
     };
     const add = () => {
       if (ml.getSource("mb-heat")) return;
@@ -493,19 +508,18 @@ class MBLogbookPanel extends HTMLElement {
         type: "heatmap",
         source: "mb-heat",
         paint: {
-          // Each stop adds the same weight; nearby stops build up into hot spots.
-          "heatmap-weight": 1,
-          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 5, 0.6, 15, 2],
-          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 5, 6, 10, 16, 15, 34],
-          "heatmap-opacity": 0.85,
+          "heatmap-weight": ["get", "w"],
+          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 5, 0.15, 15, 0.3],
+          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 5, 8, 10, 20, 15, 44],
+          "heatmap-opacity": 0.8,
           "heatmap-color": [
             "interpolate", ["linear"], ["heatmap-density"],
             0, "rgba(0,0,0,0)",
-            0.15, "rgba(137,180,250,0.55)",
-            0.35, "rgb(116,199,236)",
-            0.55, "rgb(166,227,161)",
-            0.75, "rgb(249,226,175)",
-            0.9, "rgb(250,179,135)",
+            0.08, "rgba(137,180,250,0.35)",
+            0.25, "rgba(116,199,236,0.7)",
+            0.45, "rgb(166,227,161)",
+            0.65, "rgb(249,226,175)",
+            0.82, "rgb(250,179,135)",
             1, "rgb(243,139,168)",
           ],
         },

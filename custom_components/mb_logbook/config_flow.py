@@ -241,9 +241,18 @@ class MBLogbookOptionsFlow(OptionsFlowWithReload):
     """Change entities or settings later."""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        entry = self.config_entry
         if user_input is not None:
-            return self.async_create_entry(data=_clean(user_input))
-        current = {**self.config_entry.data, **self.config_entry.options}
+            data = _clean(user_input)
+            # The name lives in the entry's data and title (shown in the car switcher,
+            # the device and its sensors' names); entity IDs don't change.
+            name = str(data.pop(CONF_CAR_NAME, "") or "").strip()
+            if name and name != entry.title:
+                self.hass.config_entries.async_update_entry(
+                    entry, title=name, data={**entry.data, CONF_CAR_NAME: name}
+                )
+            return self.async_create_entry(data=data)
+        current = {**entry.data, **entry.options, CONF_CAR_NAME: entry.data.get(CONF_CAR_NAME) or entry.title}
         return self.async_show_form(
-            step_id="init", data_schema=_schema(self.hass, current, with_name=False)
+            step_id="init", data_schema=_schema(self.hass, current, with_name=True)
         )

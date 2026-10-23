@@ -44,6 +44,7 @@
       "init": {
         "title": "Car sensors and settings",
         "data": {
+          "car_name": "Name (shown in the car switcher, e.g. \"Sam's CLA\")",
           "odometer_entity": "Odometer",
           "trip_distance_entity": "Trip distance counter (distance since start)",
           "soc_entity": "Battery %",
