@@ -443,8 +443,19 @@ class LogbookDB:
         d["points"] = json.loads(d["points"] or "[]")
         return d
 
+    def next_trip(self, car: str, after_ts: float) -> dict[str, Any] | None:
+        rows = self._exec(
+            "SELECT id FROM trips WHERE car = ? AND start_ts > ? ORDER BY start_ts LIMIT 1",
+            (car, after_ts),
+        )
+        return self.raw_trip(rows[0]["id"]) if rows else None
+
     def replace_trip(self, trip_id: int, legs: list[dict[str, Any]]) -> None:
         """Swap one trip for several (a split), in one transaction."""
+        self.replace_trips([trip_id], legs)
+
+    def replace_trips(self, trip_ids: list[int], legs: list[dict[str, Any]]) -> None:
+        """Swap trips for new ones (split or merge), in one transaction."""
         rows = []
         for t in legs:
             row = dict(t)
@@ -454,7 +465,7 @@ class LogbookDB:
         with self._lock:
             assert self._conn is not None
             with self._conn:
-                self._conn.execute("DELETE FROM trips WHERE id = ?", (trip_id,))
+                self._conn.executemany("DELETE FROM trips WHERE id = ?", [(i,) for i in trip_ids])
                 self._conn.executemany(
                     f"INSERT INTO trips ({', '.join(TRIP_COLS)}) VALUES ({', '.join('?' for _ in TRIP_COLS)})",
                     rows,

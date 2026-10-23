@@ -38,10 +38,12 @@ from .const import (
     CONF_IGNITION,
     CONF_MIN_DISTANCE,
     CONF_ODOMETER,
+    CONF_OUTSIDE_TEMP,
     CONF_PRICE,
     CONF_RANGE,
     CONF_SOC,
     CONF_STOP_MINUTES,
+    CONF_SUMMARY_NOTIFY,
     CONF_TRACKER,
     CONF_TRIP_DISTANCE,
     DEFAULT_HOME_ZONE,
@@ -135,9 +137,24 @@ def _schema(hass: HomeAssistant, d: dict[str, Any], with_name: bool) -> vol.Sche
             ): NumberSelector(NumberSelectorConfig(min=0, max=10, step=0.1,
                                                    mode=NumberSelectorMode.BOX,
                                                    unit_of_measurement="km")),
+            vol.Optional(
+                CONF_OUTSIDE_TEMP, description={"suggested_value": d.get(CONF_OUTSIDE_TEMP)}
+            ): EntitySelector(EntitySelectorConfig(domain="sensor", device_class="temperature")),
+            vol.Optional(
+                CONF_SUMMARY_NOTIFY, description={"suggested_value": d.get(CONF_SUMMARY_NOTIFY)}
+            ): SelectSelector(SelectSelectorConfig(options=_notify_targets(hass), custom_value=True)),
         }
     )
     return vol.Schema(fields)
+
+
+def _notify_targets(hass: HomeAssistant) -> list[dict[str, str]]:
+    """Where the monthly summary can go: a notification in HA, or a notify service."""
+    targets = [{"value": "persistent_notification", "label": "Home Assistant notification"}]
+    for service in sorted(hass.services.async_services_for_domain("notify")):
+        if service not in ("persistent_notification", "send_message"):
+            targets.append({"value": f"notify.{service}", "label": f"notify.{service}"})
+    return targets
 
 
 def _clean(user_input: dict[str, Any]) -> dict[str, Any]:

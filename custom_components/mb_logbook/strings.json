@@ -25,7 +25,9 @@
           "home_zone": "Home zone",
           "distance_unit": "Distance unit",
           "stop_minutes": "Minutes parked before a trip ends",
-          "min_distance_km": "Shortest trip to keep"
+          "min_distance_km": "Shortest trip to keep",
+          "outside_temp_entity": "Outside temperature (optional; for efficiency vs temperature)",
+          "summary_notify": "Monthly summary (optional; sent on the 1st at 09:00)"
         }
       }
     },
@@ -55,7 +57,9 @@
           "home_zone": "Home zone",
           "distance_unit": "Distance unit",
           "stop_minutes": "Minutes parked before a trip ends",
-          "min_distance_km": "Shortest trip to keep"
+          "min_distance_km": "Shortest trip to keep",
+          "outside_temp_entity": "Outside temperature (optional; for efficiency vs temperature)",
+          "summary_notify": "Monthly summary (optional; sent on the 1st at 09:00)"
         }
       }
     }
@@ -87,6 +91,13 @@
       "fields": {
         "config_entry_id": { "name": "Car", "description": "Only this car (default: all cars)." },
         "days": { "name": "Days", "description": "How far back to look (limited by how long the recorder keeps history)." }
+      }
+    },
+    "send_summary": {
+      "name": "Send monthly summary",
+      "description": "Sends last month's summary now, to each car that has a monthly summary set in its options.",
+      "fields": {
+        "config_entry_id": { "name": "Car", "description": "Only this car (default: all cars)." }
       }
     }
   }

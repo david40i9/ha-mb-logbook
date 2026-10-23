@@ -24,6 +24,7 @@ from .const import (
     CONF_DISTANCE_UNIT,
     CONF_HOME_ZONE,
     CONF_ODOMETER,
+    CONF_OUTSIDE_TEMP,
     CONF_RANGE,
     CONF_SOC,
     DOMAIN,
@@ -60,6 +61,8 @@ def async_register_websocket(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_charges)
     websocket_api.async_register_command(hass, ws_delete_trip)
     websocket_api.async_register_command(hass, ws_split_trip)
+    websocket_api.async_register_command(hass, ws_merge_trips)
+    websocket_api.async_register_command(hass, ws_temp_efficiency)
     websocket_api.async_register_command(hass, ws_suggest_names)
     websocket_api.async_register_command(hass, ws_trip_label)
     websocket_api.async_register_command(hass, ws_labels)
@@ -370,10 +373,16 @@ async def ws_stats(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None
             "idle_hours": 0.0, "idle_drop": 0.0,
         }
     places: dict[str, int] = {}
+    # Battery health: range the car predicts at 100%, from readings taken at a high
+    # battery % (low ones exaggerate rounding). Median per month.
+    projected: dict[str, list[float]] = {}
     for t in trips:
         mo = months.get(_month_key(t["start_ts"]))
         if mo is None:
             continue
+        for soc, rng in ((t["soc_start"], t["range_start_km"]), (t["soc_end"], t["range_end_km"])):
+            if soc is not None and rng and soc >= HEALTH_MIN_SOC:
+                projected.setdefault(_month_key(t["start_ts"]), []).append(rng / soc * 100)
         mo["trips"] += 1
         mo["distance_km"] += t["distance_km"]
         if cap and t["soc_start"] is not None and t["soc_end"] is not None and t["soc_start"] > t["soc_end"]:
@@ -394,6 +403,10 @@ async def ws_stats(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None
         mo["charges"] += 1
         mo["charged_kwh"] += c.get("kwh_meter") or c.get("kwh_car") or 0
         mo["cost"] += c.get("cost") or 0
+    for key, mo in months.items():
+        vals = sorted(projected.get(key, []))
+        mo["range100_km"] = vals[len(vals) // 2] if vals else None
+        mo["range100_samples"] = len(vals)
     top = sorted(places.items(), key=lambda kv: -kv[1])[:8]
     connection.send_result(
         msg["id"],
@@ -402,6 +415,59 @@ async def ws_stats(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None
             "top_places": [{"name": n, "count": c} for n, c in top],
         },
     )
+
+
+HEALTH_MIN_SOC = 70
+# Outside temperature bands (°C) for efficiency vs temperature.
+TEMP_BANDS = [(-99, 0), (0, 5), (5, 10), (10, 15), (15, 20), (20, 25), (25, 99)]
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/temp_efficiency",
+        vol.Required("entry_id"): str,
+        vol.Optional("months", default=12): vol.All(int, vol.Range(min=1, max=60)),
+    }
+)
+@websocket_api.async_response
+async def ws_temp_efficiency(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
+    """Driving efficiency by outside temperature, using the temperature sensor's
+    hourly statistics at each trip's start (so it covers past trips too)."""
+    from homeassistant.components.recorder import get_instance  # noqa: PLC0415
+    from homeassistant.components.recorder.statistics import statistics_during_period  # noqa: PLC0415
+
+    entry = _car(hass, msg["entry_id"])
+    logger = entry.runtime_data
+    conf = entry_conf(entry)
+    sensor = conf.get(CONF_OUTSIDE_TEMP)
+    cap = float(conf.get(CONF_CAPACITY) or 0)
+    if not sensor or not cap:
+        connection.send_result(msg["id"], {"sensor": sensor, "bands": []})
+        return
+    start = _month_start(msg["months"] - 1)
+    trips = await hass.async_add_executor_job(logger.db.trips, logger.car_id, start, time.time() + 86400, 100000)
+    stats = await get_instance(hass).async_add_executor_job(
+        statistics_during_period, hass, dt_util.utc_from_timestamp(start), None,
+        {sensor}, "hour", None, {"mean"},
+    )
+    hourly = {int(r["start"]) // 3600: r["mean"] for r in stats.get(sensor, []) if r.get("mean") is not None}
+    st = hass.states.get(sensor)
+    unit = (st.attributes.get("unit_of_measurement") if st else None) or "°C"
+    bands = [{"lo": lo, "hi": hi, "trips": 0, "km": 0.0, "kwh": 0.0} for lo, hi in TEMP_BANDS]
+    for t in trips:
+        temp = hourly.get(int(t["start_ts"]) // 3600)
+        # Short trips round the battery % too coarsely to say much.
+        if temp is None or t["distance_km"] < 5 or t["soc_start"] is None or t["soc_end"] is None or t["soc_start"] <= t["soc_end"]:
+            continue
+        if unit == "°F":
+            temp = (temp - 32) * 5 / 9
+        for b in bands:
+            if b["lo"] <= temp < b["hi"]:
+                b["trips"] += 1
+                b["km"] += t["distance_km"]
+                b["kwh"] += (t["soc_start"] - t["soc_end"]) / 100 * cap
+                break
+    connection.send_result(msg["id"], {"sensor": sensor, "bands": bands})
 
 
 @websocket_api.websocket_command(
@@ -659,3 +725,36 @@ async def ws_split_trip(hass: HomeAssistant, connection, msg: dict[str, Any]) ->
     await hass.async_add_executor_job(db.replace_trip, msg["trip_id"], [leg1, leg2])
     _refresh_all(hass)
     connection.send_result(msg["id"], {"split_at": t1, "resumed": t2})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/merge_trips", vol.Required("trip_id"): int}
+)
+@websocket_api.async_response
+async def ws_merge_trips(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
+    """Join a trip with the car's next one (a drive the logger cut in two)."""
+    db = hass.data[DOMAIN]["db"]
+    first = await hass.async_add_executor_job(db.raw_trip, msg["trip_id"])
+    if first is None:
+        connection.send_error(msg["id"], "not_found", "Trip not found")
+        return
+    nxt = await hass.async_add_executor_job(db.next_trip, first["car"], first["start_ts"])
+    if nxt is None:
+        connection.send_error(msg["id"], "no_next", "There is no later trip to merge with.")
+        return
+    merged = {
+        **first,
+        "end_ts": nxt["end_ts"],
+        "odo_end_km": nxt["odo_end_km"],
+        "distance_km": round((first["distance_km"] or 0) + (nxt["distance_km"] or 0), 3),
+        "soc_end": nxt["soc_end"],
+        "range_end_km": nxt["range_end_km"],
+        "end_lat": nxt["end_lat"],
+        "end_lon": nxt["end_lon"],
+        "end_place": nxt["end_place"],
+        "points": first["points"] + nxt["points"],
+    }
+    await hass.async_add_executor_job(db.replace_trips, [first["id"], nxt["id"]], [merged])
+    _refresh_all(hass)
+    connection.send_result(msg["id"], {"merged": [first["id"], nxt["id"]]})

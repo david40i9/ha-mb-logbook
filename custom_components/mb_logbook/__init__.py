@@ -20,12 +20,14 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.start import async_at_started
+from homeassistant.util import dt as dt_util
 from homeassistant.helpers.typing import ConfigType
 import voluptuous as vol
 
 from .const import DB_FILENAME, DOMAIN, VERSION, entry_conf
 from .db import LogbookDB
 from .importer import async_import_history
+from .summary import async_send as async_send_summary, async_setup_summary
 from .logger import CarLogger
 from .websocket import async_register_websocket
 
@@ -134,6 +136,20 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         ),
         supports_response=SupportsResponse.OPTIONAL,
     )
+
+    async def _summary(call: ServiceCall) -> None:
+        """Send last month's summary now, to each car with a summary target set."""
+        wanted = call.data.get("config_entry_id")
+        for entry in hass.config_entries.async_loaded_entries(DOMAIN):
+            if not wanted or entry.entry_id == wanted:
+                await async_send_summary(hass, entry.runtime_data, dt_util.now())
+
+    hass.services.async_register(
+        DOMAIN,
+        "send_summary",
+        _summary,
+        schema=vol.Schema({vol.Optional("config_entry_id"): cv.string}),
+    )
     return True
 
 
@@ -143,6 +159,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: LogbookConfigEntry) -> b
     await logger.async_start()
     entry.runtime_data = logger
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    if unsub := async_setup_summary(hass, logger):
+        entry.async_on_unload(unsub)
 
     if not logger.imported:
         # First run for this car: fill in everything the recorder still has.

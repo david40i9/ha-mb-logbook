@@ -210,6 +210,8 @@ class MBLogbookPanel extends HTMLElement {
       ),
       this._chart("Charging cost", labels, [{ values: months.map((m) => m.cost), colour: "#f9e2af" }], (v) => this._money(v)),
       this._chart(`Efficiency (${this._effUnit})`, labels, [{ values: months.map((m) => eff(m) || 0), colour: "#cba6f7" }], (v) => (v ? v.toFixed(2) : "")),
+      this._healthChart(months, labels),
+      `<div class="section chart" id=tempeff><h2>Efficiency vs outside temperature</h2><div class=dim>Loading…</div></div>`,
     ].join("");
 
     const top = stats.top_places.length
@@ -227,6 +229,7 @@ class MBLogbookPanel extends HTMLElement {
         <div class=section><h2>Most visited <span class=dim>(last 12 months)</span></h2>${top}</div>
       </div>`;
     this._loadMileage();
+    this._loadTempEff();
     this._drawRoutes(routes);
   }
 
@@ -346,24 +349,72 @@ class MBLogbookPanel extends HTMLElement {
     );
   }
 
-  /** Grouped bar chart as inline SVG. series: [{name?, values[], colour}] */
-  _chart(title, labels, series, fmt) {
+  /** Range the car predicts at 100% battery, month by month: a slow fall is battery wear. */
+  _healthChart(months, labels) {
+    const vals = months.map((m) => (m.range100_km ? +this._d(m.range100_km) : 0));
+    const have = vals.filter(Boolean);
+    const title = `Battery health: predicted range at 100% (${this._du})`;
+    if (!have.length) return `<div class="section chart"><h2>${title}</h2><div class=dim>No readings yet: this uses the car's range at 70% battery or more.</div></div>`;
+    // Start the bars near the lowest month so a few percent of wear is visible.
+    const base = Math.floor((Math.min(...have) * 0.9) / 10) * 10;
+    const first = have[0];
+    const last = have[have.length - 1];
+    const note = have.length > 1 ? `<div class=dim>${last >= first ? "+" : "−"}${Math.abs(((last - first) / first) * 100).toFixed(1)}% since ${labels[vals.indexOf(first)]}. The car's range also moves with driving style and temperature, so look at the trend over months.</div>` : "";
+    return this._chart(title, labels, [{ values: vals, colour: "#94e2d5" }], (v) => (v ? v.toFixed(0) : ""), base).replace("</svg></div>", `</svg>${note}</div>`);
+  }
+
+  async _loadTempEff() {
+    const box = this.shadowRoot.getElementById("tempeff");
+    if (!box) return;
+    const car = this._car;
+    let res;
+    try {
+      res = await this._hass.callWS({ type: "mb_logbook/temp_efficiency", entry_id: car.entry_id, months: 12 });
+    } catch (e) {
+      box.querySelector(".dim").textContent = "Couldn't load.";
+      return;
+    }
+    if (this._car !== car) return;
+    if (!res.sensor) {
+      box.querySelector(".dim").textContent = "Choose an outside temperature sensor in the car's options (Settings → Devices & services → MB Logbook → Configure) to see this.";
+      return;
+    }
+    const bands = res.bands.filter((b) => b.trips);
+    if (!bands.length) {
+      box.querySelector(".dim").textContent = "No trips with a recorded temperature yet (the sensor needs long-term statistics).";
+      return;
+    }
+    const lbl = (b) => (b.lo < -50 ? `<${b.hi}°` : b.hi > 50 ? `≥${b.lo}°` : `${b.lo}–${b.hi}°`);
+    const html = this._chart(
+      `Efficiency vs outside temperature (${this._effUnit})`,
+      bands.map(lbl),
+      [{ values: bands.map((b) => this._eff(b.km, b.kwh) || 0), colour: "#89dceb" }],
+      (v) => (v ? v.toFixed(2) : ""),
+      0,
+      true
+    ).replace("</svg></div>", `</svg><div class=dim>${bands.map((b) => `${lbl(b)}: ${b.trips} trips`).join(" · ")} (trips of 5 km or more, temperature at the start)</div></div>`);
+    box.outerHTML = html.replace('<div class="section chart">', '<div class="section chart" id=tempeff>');
+  }
+
+  /** Grouped bar chart as inline SVG. series: [{name?, values[], colour}]. base: value at the
+   * bottom of the bars (0 normally). allValues: label every bar, not just the last. */
+  _chart(title, labels, series, fmt, base = 0, allValues = false) {
     const W = 600;
     const H = 200;
     const top = 18;
     const bottom = 22;
     const n = labels.length;
-    const max = Math.max(1e-9, ...series.flatMap((s) => s.values));
+    const max = Math.max(base + 1e-9, ...series.flatMap((s) => s.values));
     const slot = W / n;
     const gap = slot * 0.25;
     const bw = (slot - gap) / series.length;
     let bars = "";
     series.forEach((s, si) => {
       s.values.forEach((v, i) => {
-        const h = ((H - top - bottom) * v) / max;
+        const h = v ? ((H - top - bottom) * Math.max(v - base, 0)) / (max - base) : 0;
         const x = i * slot + gap / 2 + si * bw;
         const y = H - bottom - h;
-        const last = i === n - 1;
+        const last = i === n - 1 || allValues;
         bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${(bw - 1).toFixed(1)}" height="${Math.max(h, v ? 1 : 0).toFixed(1)}" rx="2" fill="${s.colour}" opacity="${last ? 1 : 0.75}"><title>${labels[i]}: ${fmt(v)}</title></rect>`;
         if (last && v) bars += `<text x="${(x + bw / 2).toFixed(1)}" y="${(y - 4).toFixed(1)}" class=val>${fmt(v)}</text>`;
       });

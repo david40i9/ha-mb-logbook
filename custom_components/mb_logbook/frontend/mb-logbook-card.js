@@ -565,7 +565,6 @@ class MBLogbookCard extends HTMLElement {
   }
 
   _exportCsv() {
-    const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const unit = this._miles ? "mi" : "km";
     const k = this._miles ? 1 / KM_PER_MI : 1;
     const loc = this._hass.locale?.language;
@@ -587,11 +586,46 @@ class MBLogbookCard extends HTMLElement {
         t.soc_end ?? "",
       ]);
     }
+    const f = this._labelFilter && this._labelFilter !== "all" ? `-${this._labelFilter === "__none" ? "unlabelled" : this._labelFilter}` : "";
+    this._download(rows, `trips${f}`);
+  }
+
+  _exportChargesCsv() {
+    const loc = this._hass.locale?.language;
+    const cur = this._hass.config?.currency || "";
+    const rows = [["Date", "Start time", "End time", "Place", "Latitude", "Longitude", "Battery start %", "Battery end %", "Energy (kWh)", "Energy source", "Peak power (kW)", `Cost (${cur})`, "Cost basis", `Per kWh (${cur})`]];
+    for (const c of [...this._charges].sort((a, b) => a.start_ts - b.start_ts)) {
+      const s = new Date(c.start_ts * 1000);
+      const e = new Date(c.end_ts * 1000);
+      const kwh = c.kwh_meter ?? c.kwh_car;
+      const per = c.cost_source === "rate" || c.cost_source === "free" ? c.rate : c.kwh_meter && c.cost ? c.cost / c.kwh_meter : null;
+      rows.push([
+        s.toLocaleDateString(loc),
+        s.toLocaleTimeString(loc, { hour: "2-digit", minute: "2-digit" }),
+        e.toLocaleTimeString(loc, { hour: "2-digit", minute: "2-digit" }),
+        c.place || "",
+        c.lat != null ? c.lat.toFixed(5) : "",
+        c.lon != null ? c.lon.toFixed(5) : "",
+        c.soc_start ?? "",
+        c.soc_end ?? "",
+        kwh != null ? kwh.toFixed(2) : "",
+        c.kwh_meter != null ? "metered" : "from battery %",
+        c.max_power_kw ? c.max_power_kw.toFixed(1) : "",
+        c.cost != null ? c.cost.toFixed(2) : "",
+        { meter: "metered", power: "live price", rate: "place rate", free: "free" }[c.cost_source] || "",
+        per != null ? per.toFixed(3) : "",
+      ]);
+    }
+    this._download(rows, "charges");
+  }
+
+  /** Save rows as a CSV named after the car, what it holds and the period. */
+  _download(rows, what) {
+    const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const csv = rows.map((r) => r.map(q).join(",")).join("\r\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
-    const f = this._labelFilter && this._labelFilter !== "all" ? `-${this._labelFilter === "__none" ? "unlabelled" : this._labelFilter}` : "";
-    a.download = `${this._car.name}-trips-${this._range().label.replace(/[^\w]+/g, "-")}${f}.csv`.toLowerCase();
+    a.download = `${this._car.name}-${what}-${this._range().label.replace(/[^\w]+/g, "-")}.csv`.toLowerCase();
     document.body.appendChild(a);
     a.click();
     setTimeout(() => {
@@ -684,7 +718,7 @@ class MBLogbookCard extends HTMLElement {
             <td class=n>${this._eff(x.distance_km, kwh)}</td>
             <td class=n>${park}</td>
             <td class=n>${x.point_count > 1 ? "🗺" : ""}</td>
-          </tr>${open ? `<tr class=maprow><td colspan=9>${form}<div id=mapbox></div>${this._hass.user?.is_admin && !naming ? `<div class=tripactions>${x.end_ts - x.start_ts >= 2400 ? `<button class=splittrip data-id="${x.id}" title="For two drives logged as one: splits at the longest stop">Split at the stop</button> ` : ""}<button class=deltrip data-id="${x.id}">Delete this trip</button></div>` : ""}</td></tr>` : ""}`;
+          </tr>${open ? `<tr class=maprow><td colspan=9>${form}<div id=mapbox></div>${this._hass.user?.is_admin && !naming ? `<div class=tripactions>${x.end_ts - x.start_ts >= 2400 ? `<button class=splittrip data-id="${x.id}" title="For two drives logged as one: splits at the longest stop">Split at the stop</button> ` : ""}<button class=mergetrip data-id="${x.id}" title="For one drive logged as two: joins this trip with the one after it">Merge with next trip</button> <button class=deltrip data-id="${x.id}">Delete this trip</button></div>` : ""}</td></tr>` : ""}`;
       })
       .join("");
   }
@@ -746,7 +780,7 @@ class MBLogbookCard extends HTMLElement {
       this._tab === "trips"
         ? `${this._labelBar()}<table><thead><tr>${this._th("start", "Start")}${this._th("route", "Route")}${this._th("label", "Label")}${this._th("dist", "Distance", 1)}${this._th("used", "Battery", 1)}${this._th("kwh", "Used", 1)}${this._th("eff", "Efficiency", 1)}${this._th("park", "Parked before", 1)}<th></th></tr></thead><tbody>${this._tripRows()}</tbody></table>`
         : this._tab === "charges"
-          ? `<table><thead><tr>${this._th("start", "Start")}${this._th("where", "Where")}${this._th("soc", "Battery", 1)}${this._th("kwh", "Energy", 1)}${this._th("peak", "Peak", 1)}${this._th("cost", "Cost", 1)}${this._th("perkwh", "Per kWh", 1)}</tr></thead><tbody>${this._chargeRows()}</tbody></table>
+          ? `${this._charges.length ? `<div class=labelbar><button class="csv csvc" title="Download the charging sessions shown">Export CSV</button></div>` : ""}<table><thead><tr>${this._th("start", "Start")}${this._th("where", "Where")}${this._th("soc", "Battery", 1)}${this._th("kwh", "Energy", 1)}${this._th("peak", "Peak", 1)}${this._th("cost", "Cost", 1)}${this._th("perkwh", "Per kWh", 1)}</tr></thead><tbody>${this._chargeRows()}</tbody></table>
              ${this._rateSection()}`
           : `<table><thead><tr>${this._th("name", "Name")}${this._th("radius", "Radius")}${this._th("uses", "Trip ends / charges", 1)}<th></th></tr></thead><tbody>${this._placeRows()}</tbody></table>
              <div class="dim pad">Named places are shared by all cars. Home Assistant zones take priority where they overlap.</div>
@@ -875,7 +909,8 @@ class MBLogbookCard extends HTMLElement {
         this._render();
       })
     );
-    root.querySelector("button.csv")?.addEventListener("click", () => this._exportCsv());
+    root.querySelector("button.csv:not(.csvc)")?.addEventListener("click", () => this._exportCsv());
+    root.querySelector("button.csvc")?.addEventListener("click", () => this._exportChargesCsv());
     root.querySelectorAll("select.tlabel").forEach((s) => {
       s.addEventListener("click", (ev) => ev.stopPropagation());
       s.addEventListener("change", async () => {
@@ -907,6 +942,23 @@ class MBLogbookCard extends HTMLElement {
           await this._hass.callWS({ type: "mb_logbook/split_trip", trip_id: Number(b.dataset.id) });
         } catch (e) {
           alert(`Couldn't split the trip: ${e.message || e.code || e}`);
+          return;
+        }
+        await this._load();
+      })
+    );
+    root.querySelectorAll("button.mergetrip").forEach((b) =>
+      b.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        const id = Number(b.dataset.id);
+        const t = this._trips.find((x) => x.id === id);
+        const next = t && [...this._trips].filter((x) => x.start_ts > t.start_ts).sort((a, c) => a.start_ts - c.start_ts)[0];
+        const what = next ? `the ${this._when(next.start_ts)} trip (${this._dist(next.distance_km)})` : "the next trip";
+        if (!confirm(`Join this trip with ${what} into one?`)) return;
+        try {
+          await this._hass.callWS({ type: "mb_logbook/merge_trips", trip_id: id });
+        } catch (e) {
+          alert(`Couldn't merge: ${e.message || e.code || e}`);
           return;
         }
         await this._load();
@@ -1112,7 +1164,7 @@ MBLogbookCard.css = `
   #mapbox ha-map { height: 100%; display: block; }
 `;
 
-const CARD_VERSION = "0.15.0";
+const CARD_VERSION = "0.16.0";
 
 if (!customElements.get("mb-logbook-card")) {
   customElements.define("mb-logbook-card", MBLogbookCard);
