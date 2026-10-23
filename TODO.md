@@ -17,16 +17,16 @@ Ideas and planned work for MB Logbook. Not in any order yet.
 
 Ranked by value for effort, keeping MB Logbook local-only and multi-car.
 
-1. ~~**Export trips and charges to CSV**~~ (trips done in 0.11), filtered by period, car and place — for mileage claims and expenses. *(Tessie and TeslaFi exports; Tessie users use them for tax-time mileage.)*
+1. ~~**Export trips and charges to CSV**~~ (trips 0.11, charges 0.16), filtered by period, car and place — for mileage claims and expenses. *(Tessie and TeslaFi exports; Tessie users use them for tax-time mileage.)*
 2. ~~**Business / personal tagging**~~ (labels 0.11, default label per place 0.12) on trips (with a default per place, e.g. trips to work), and a mileage summary per tag. *(TeslaFi / Tessie trip classification.)*
-3. **Charging efficiency (gross vs net)**: metered kWh at the charger vs kWh that reached the battery, per session and per month — we already have both numbers for home charges. *(TeslaMate shows net and gross consumption.)*
-4. **Battery health trend**: projected range at 100% (range ÷ battery %), sampled at high charge levels, plotted month by month. *(TeslaMate "projected 100% range"; Tessie battery health.)*
-5. **Efficiency vs outside temperature**: record the outdoor temperature (any HA weather or temperature sensor) at each trip and chart efficiency against it — explains winter drops. *(TeslaMate efficiency dashboards; Tessie.)*
+3. *Not planned (depends on a home charger meter most setups lack):* **Charging efficiency (gross vs net)**: metered kWh at the charger vs kWh that reached the battery, per session and per month — we already have both numbers for home charges. *(TeslaMate shows net and gross consumption.)*
+4. ~~**Battery health trend**~~ (0.16): projected range at 100% (range ÷ battery %), sampled at high charge levels, plotted month by month. *(TeslaMate "projected 100% range"; Tessie battery health.)*
+5. ~~**Efficiency vs outside temperature**~~ (0.16): record the outdoor temperature (any HA weather or temperature sensor) at each trip and chart efficiency against it — explains winter drops. *(TeslaMate efficiency dashboards; Tessie.)*
 6. **Drain detail**: idle drain by place and by month (where the car loses most while parked), flagging parks with pre-climate. *(TeslaMate vampire drain dashboard; the "Stats" app shows drain per location.)*
 7. **Off-peak share and "if charged at peak" saving** for home charges, using the live price already recorded per session. *(evcc's cheapest-slot planning, turned into a report.)*
-8. **Events for automations**: fire `mb_logbook_trip_ended` / `mb_logbook_charge_ended` events with the record, so users can send their own notifications or summaries. *(TeslaMate publishes drives and charges over MQTT for automations.)*
+8. *Not planned for now:* **Events for automations**: fire `mb_logbook_trip_ended` / `mb_logbook_charge_ended` events with the record, so users can send their own notifications or summaries. *(TeslaMate publishes drives and charges over MQTT for automations.)*
 9. **Visited places map / timeline**: all trip ends as a heat map, and a day-by-day timeline. *(TeslaMate "visited" dashboard.)*
-10. **Monthly summary notification** (opt-in): last month's miles, energy, cost and drain.
+10. ~~**Monthly summary notification**~~ (0.16) (opt-in): last month's miles, energy, cost and drain.
 11. **Charging curve** for rapid charges: store power samples during a session and plot power vs battery %. *(TeslaMate charge detail.)* Needs more frequent data than the car may send.
 12. *Considered, not planned:* sending live data to A Better Route Planner — useful for some, but it sends location and battery data to an outside service, against MB Logbook's local-only aim. Could only ever be an opt-in, off by default.
 
@@ -43,3 +43,6 @@ Ranked by value for effort, keeping MB Logbook local-only and multi-car.
 - [x] Trip labels, label filter with totals, CSV export (0.11)
 - [x] Default trip label per place (0.12)
 - [x] Works without a charger meter (cost from the car's charging power) or an ignition sensor (trips from movement) (0.10)
+- [x] End trips stuck with the ignition on; split trip (0.15)
+- [x] Sortable columns, business mileage chart (0.14)
+- [x] Battery health, efficiency vs temperature, monthly summary, merge trips, charges CSV (0.16)
