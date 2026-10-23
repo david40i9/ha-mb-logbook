@@ -94,13 +94,14 @@ MIGRATIONS = (
     ("charges", "lat", "REAL"),
     ("charges", "lon", "REAL"),
     ("charges", "cost_basis", "TEXT"),
+    ("trips", "temp_c", "REAL"),
 )
 
 TRIP_COLS = (
     "car", "start_ts", "end_ts", "odo_start_km", "odo_end_km", "distance_km",
     "soc_start", "soc_end", "range_start_km", "range_end_km",
     "start_lat", "start_lon", "end_lat", "end_lon", "start_place", "end_place",
-    "park_hours", "park_drain_hours", "park_soc_drop", "park_charged", "points",
+    "park_hours", "park_drain_hours", "park_soc_drop", "park_charged", "points", "temp_c",
 )
 CHARGE_COLS = (
     "car", "start_ts", "end_ts", "soc_start", "soc_end", "kwh_car", "kwh_meter",
@@ -470,6 +471,13 @@ class LogbookDB:
                     f"INSERT INTO trips ({', '.join(TRIP_COLS)}) VALUES ({', '.join('?' for _ in TRIP_COLS)})",
                     rows,
                 )
+
+    def set_trip_temps(self, temps: list[tuple[int, float]]) -> None:
+        """Fill in outside temperatures found later (from recorder history)."""
+        with self._lock:
+            assert self._conn is not None
+            with self._conn:
+                self._conn.executemany("UPDATE trips SET temp_c = ? WHERE id = ?", [(t, i) for i, t in temps])
 
     def delete_trip(self, trip_id: int) -> None:
         self._exec("DELETE FROM trips WHERE id = ?", (trip_id,))

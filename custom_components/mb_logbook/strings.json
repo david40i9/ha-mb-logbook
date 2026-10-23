@@ -26,7 +26,7 @@
           "distance_unit": "Distance unit",
           "stop_minutes": "Minutes parked before a trip ends",
           "min_distance_km": "Shortest trip to keep",
-          "outside_temp_entity": "Outside temperature (optional; for efficiency vs temperature)",
+          "outside_temp_entity": "Outside temperature for efficiency vs temperature (optional; leave empty to use Home Assistant's local weather)",
           "summary_notify": "Monthly summary (optional; sent on the 1st at 09:00)"
         }
       }
@@ -58,7 +58,7 @@
           "distance_unit": "Distance unit",
           "stop_minutes": "Minutes parked before a trip ends",
           "min_distance_km": "Shortest trip to keep",
-          "outside_temp_entity": "Outside temperature (optional; for efficiency vs temperature)",
+          "outside_temp_entity": "Outside temperature for efficiency vs temperature (optional; leave empty to use Home Assistant's local weather)",
           "summary_notify": "Monthly summary (optional; sent on the 1st at 09:00)"
         }
       }

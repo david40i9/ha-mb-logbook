@@ -375,13 +375,13 @@ class MBLogbookPanel extends HTMLElement {
       return;
     }
     if (this._car !== car) return;
-    if (!res.sensor) {
-      box.querySelector(".dim").textContent = "Choose an outside temperature sensor in the car's options (Settings → Devices & services → MB Logbook → Configure) to see this.";
+    if (!res.source) {
+      box.querySelector(".dim").textContent = "No weather entity found. Add a weather integration, or choose a temperature sensor in the car's options (Settings → Devices & services → MB Logbook → Configure).";
       return;
     }
     const bands = res.bands.filter((b) => b.trips);
     if (!bands.length) {
-      box.querySelector(".dim").textContent = "No trips with a recorded temperature yet (the sensor needs long-term statistics).";
+      box.querySelector(".dim").textContent = `No trips with a temperature from ${res.name} yet. Each new trip records it; older trips only as far back as Home Assistant keeps history.`;
       return;
     }
     const lbl = (b) => (b.lo < -50 ? `<${b.hi}°` : b.hi > 50 ? `≥${b.lo}°` : `${b.lo}–${b.hi}°`);
@@ -392,7 +392,7 @@ class MBLogbookPanel extends HTMLElement {
       (v) => (v ? v.toFixed(2) : ""),
       0,
       true
-    ).replace("</svg></div>", `</svg><div class=dim>${bands.map((b) => `${lbl(b)}: ${b.trips} trips`).join(" · ")} (trips of 5 km or more, temperature at the start)</div></div>`);
+    ).replace("</svg></div>", `</svg><div class=dim>${bands.map((b) => `${lbl(b)}: ${b.trips} trips`).join(" · ")} (trips of 5 km or more; temperature from ${escp(res.name)} at the start)</div></div>`);
     box.outerHTML = html.replace('<div class="section chart">', '<div class="section chart" id=tempeff>');
   }
 

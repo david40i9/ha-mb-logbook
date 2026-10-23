@@ -40,6 +40,7 @@ from .const import (
     UNKNOWN_STATES,
 )
 from . import rules
+from .temperature import temp_c, temp_source
 from .logger import MOVE_TRIGGER_M, STALE_MINUTES, CarLogger, _moved_m, _num, _to_km
 
 _LOGGER = logging.getLogger(__name__)
@@ -63,6 +64,7 @@ class _Replay:
 
     def __init__(self, logger: CarLogger) -> None:
         self.lg = logger
+        self.temp_id: str | None = None
         self.conf = logger.conf
         self.cur: dict[str, State] = {}
         self.trip: dict[str, Any] | None = None
@@ -113,6 +115,7 @@ class _Replay:
             "points": [[round(ts), lat, lon]] if pos else [],
             "last_fix": pos[2] if pos else None,
             "moved_ts": ts,
+            "temp_c": temp_c(self.cur.get(self.temp_id)) if self.temp_id else None,
             **rules.park_fields(self.park, ts, soc),
         }
 
@@ -161,6 +164,7 @@ class _Replay:
                 "park_soc_drop": t["park_soc_drop"],
                 "park_charged": t["park_charged"],
                 "points": pts,
+                "temp_c": t.get("temp_c"),
             }
         )
         # A charge that started before the trip was closed belongs to this park.
@@ -343,6 +347,9 @@ async def async_import_history(
         CONF_CHARGE_POWER,
     )
     ids = [conf[k] for k in keys if conf.get(k)]
+    temp_id = temp_source(hass, conf)
+    if temp_id:
+        ids.append(temp_id)
     start = cutoff - timedelta(days=days)
     states = await get_instance(hass).async_add_executor_job(_fetch, hass, start, cutoff, ids)
 
@@ -360,6 +367,7 @@ async def async_import_history(
     events.sort(key=lambda e: (e[0], e[1]))
 
     replay = _Replay(logger)
+    replay.temp_id = temp_id
     for ts, _, eid, st in events:
         replay.feed(ts, eid, st)
     # Close anything that had finished before the cut-off.

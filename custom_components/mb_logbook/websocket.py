@@ -24,7 +24,6 @@ from .const import (
     CONF_DISTANCE_UNIT,
     CONF_HOME_ZONE,
     CONF_ODOMETER,
-    CONF_OUTSIDE_TEMP,
     CONF_RANGE,
     CONF_SOC,
     DOMAIN,
@@ -36,6 +35,7 @@ from .const import (
 )
 from .db import distance_m
 from .logger import _num, _to_km
+from .temperature import temp_c, temp_source, to_c
 
 
 def _entries(hass: HomeAssistant) -> dict[str, Any]:
@@ -431,43 +431,75 @@ TEMP_BANDS = [(-99, 0), (0, 5), (5, 10), (10, 15), (15, 20), (20, 25), (25, 99)]
 )
 @websocket_api.async_response
 async def ws_temp_efficiency(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
-    """Driving efficiency by outside temperature, using the temperature sensor's
-    hourly statistics at each trip's start (so it covers past trips too)."""
+    """Driving efficiency by outside temperature at each trip's start."""
     from homeassistant.components.recorder import get_instance  # noqa: PLC0415
     from homeassistant.components.recorder.statistics import statistics_during_period  # noqa: PLC0415
 
     entry = _car(hass, msg["entry_id"])
     logger = entry.runtime_data
     conf = entry_conf(entry)
-    sensor = conf.get(CONF_OUTSIDE_TEMP)
+    source = temp_source(hass, conf)
     cap = float(conf.get(CONF_CAPACITY) or 0)
-    if not sensor or not cap:
-        connection.send_result(msg["id"], {"sensor": sensor, "bands": []})
+    st = hass.states.get(source) if source else None
+    info = {"source": source, "name": st.name if st else source}
+    if not source or not cap:
+        connection.send_result(msg["id"], {**info, "bands": []})
         return
     start = _month_start(msg["months"] - 1)
     trips = await hass.async_add_executor_job(logger.db.trips, logger.car_id, start, time.time() + 86400, 100000)
-    stats = await get_instance(hass).async_add_executor_job(
-        statistics_during_period, hass, dt_util.utc_from_timestamp(start), None,
-        {sensor}, "hour", None, {"mean"},
-    )
-    hourly = {int(r["start"]) // 3600: r["mean"] for r in stats.get(sensor, []) if r.get("mean") is not None}
-    st = hass.states.get(sensor)
-    unit = (st.attributes.get("unit_of_measurement") if st else None) or "°C"
+    # Trips store the temperature when they start; fill older ones from the recorder
+    # (a sensor's long-term hourly statistics, or a weather entity's state history,
+    # which only goes back as far as the recorder keeps history) and save them.
+    missing = [t for t in trips if t.get("temp_c") is None]
+    if missing:
+        first = dt_util.utc_from_timestamp(min(t["start_ts"] for t in missing) - 3 * 3600)
+        found: list[tuple[int, float]] = []
+        if source.startswith("weather."):
+            hist = await get_instance(hass).async_add_executor_job(_history, hass, first, source)
+            readings = [(s.last_updated.timestamp(), temp_c(s)) for s in hist]
+            readings = [(ts, v) for ts, v in readings if v is not None]
+            for t in missing:
+                before = [v for ts, v in readings if t["start_ts"] - 3 * 3600 <= ts <= t["start_ts"]]
+                if before:
+                    found.append((t["id"], before[-1]))
+        else:
+            stats = await get_instance(hass).async_add_executor_job(
+                statistics_during_period, hass, first, None, {source}, "hour", None, {"mean"},
+            )
+            unit = st.attributes.get("unit_of_measurement") if st else None
+            hourly = {int(r["start"]) // 3600: r["mean"] for r in stats.get(source, []) if r.get("mean") is not None}
+            for t in missing:
+                v = to_c(hourly.get(int(t["start_ts"]) // 3600), unit)
+                if v is not None:
+                    found.append((t["id"], v))
+        if found:
+            await hass.async_add_executor_job(logger.db.set_trip_temps, found)
+            temps = dict(found)
+            for t in missing:
+                t["temp_c"] = temps.get(t["id"])
     bands = [{"lo": lo, "hi": hi, "trips": 0, "km": 0.0, "kwh": 0.0} for lo, hi in TEMP_BANDS]
     for t in trips:
-        temp = hourly.get(int(t["start_ts"]) // 3600)
+        temp = t.get("temp_c")
         # Short trips round the battery % too coarsely to say much.
         if temp is None or t["distance_km"] < 5 or t["soc_start"] is None or t["soc_end"] is None or t["soc_start"] <= t["soc_end"]:
             continue
-        if unit == "°F":
-            temp = (temp - 32) * 5 / 9
         for b in bands:
             if b["lo"] <= temp < b["hi"]:
                 b["trips"] += 1
                 b["km"] += t["distance_km"]
                 b["kwh"] += (t["soc_start"] - t["soc_end"]) / 100 * cap
                 break
-    connection.send_result(msg["id"], {"sensor": sensor, "bands": bands})
+    connection.send_result(msg["id"], {**info, "bands": bands})
+
+
+def _history(hass: HomeAssistant, start, entity_id: str) -> list:
+    from homeassistant.components.recorder import history  # noqa: PLC0415
+
+    found = history.get_significant_states(
+        hass, start, None, [entity_id],
+        include_start_time_state=True, significant_changes_only=False, no_attributes=False,
+    )
+    return found.get(entity_id, [])
 
 
 @websocket_api.websocket_command(

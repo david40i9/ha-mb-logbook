@@ -57,6 +57,7 @@ from .const import (
 )
 from . import rules
 from .db import LogbookDB, distance_m
+from .temperature import temp_c, temp_source
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -430,6 +431,7 @@ class CarLogger:
             "points": [[round(now), lat, lon]] if pos else [],
             "last_fix": pos[2] if pos else None,
             "moved_ts": now,
+            "temp_c": temp_c(self.hass.states.get(temp_source(self.hass, self.conf) or "")),
             **rules.park_fields(self._state.get("park"), now, soc),
         }
         self._save()
@@ -507,6 +509,7 @@ class CarLogger:
             "park_soc_drop": trip.get("park_soc_drop"),
             "park_charged": trip.get("park_charged"),
             "points": points,
+            "temp_c": trip.get("temp_c"),
         }
         await self.hass.async_add_executor_job(self.db.add_trip, record)
         # A charge that started before the trip was closed belongs to this park.

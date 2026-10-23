@@ -139,7 +139,9 @@ def _schema(hass: HomeAssistant, d: dict[str, Any], with_name: bool) -> vol.Sche
                                                    unit_of_measurement="km")),
             vol.Optional(
                 CONF_OUTSIDE_TEMP, description={"suggested_value": d.get(CONF_OUTSIDE_TEMP)}
-            ): EntitySelector(EntitySelectorConfig(domain="sensor", device_class="temperature")),
+            ): EntitySelector(EntitySelectorConfig(filter=[
+                {"domain": "weather"}, {"domain": "sensor", "device_class": "temperature"},
+            ])),
             vol.Optional(
                 CONF_SUMMARY_NOTIFY, description={"suggested_value": d.get(CONF_SUMMARY_NOTIFY)}
             ): SelectSelector(SelectSelectorConfig(options=_notify_targets(hass), custom_value=True)),
