@@ -10,5 +10,5 @@
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/david40i9/ha-mercedes-ev-logbook/issues",
   "requirements": [],
-  "version": "0.20.2"
+  "version": "0.20.3"
 }

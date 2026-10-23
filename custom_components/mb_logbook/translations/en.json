@@ -8,7 +8,7 @@
       },
       "entities": {
         "title": "Car sensors and settings",
-        "description": "Check the sensors. Battery capacity is the usable size in kWh (for example 66.5 for an EQA 250). The charger meter and price are optional: when set, energy and cost of home charges are credited to this car while it is charging in the home zone.",
+        "description": "Check the sensors. Battery capacity is the usable size in kWh (for example 66.5 for an EQA 250). Everything else is optional. Charging costs use the rates you set for each place in the card's Charging tab (Home included, with an optional off-peak window); a live price sensor, if you pick one, is used for home charges instead. A home charger meter gives the most accurate home energy.",
         "data": {
           "car_name": "Name",
           "odometer_entity": "Odometer",

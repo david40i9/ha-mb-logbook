@@ -32,7 +32,7 @@ It builds on the [MercedesME 2020 (mbapi2020)](https://github.com/ReneNulschDE/m
 |---|---|
 | 🚗 **Trips** | Start and end, distance, battery used, kWh, efficiency, outside temperature and the route on a map |
 | 🅿️ **Parked drain** | What the car lost between trips, and an idle-drain sensor in % per day |
-| ⚡ **Charging** | Every session with kWh, peak power and cost: metered at home, a fixed rate (or free) anywhere else, with rate history |
+| ⚡ **Charging** | Every session with kWh, peak power and cost, from your own rates per place (with an optional off-peak window) or a live price sensor; rate history keeps old costs right |
 | 🏷️ **Mileage claims** | Business / Commute / Personal labels, a default label per place, mileage by label and CSV export |
 | 📍 **Your own places** | Name any stop with a draggable, resizable circle; the name reaches back through all your history |
 | 🔋 **Battery health** | The range the car predicts at 100%, month by month |
@@ -51,7 +51,7 @@ It builds on the [MercedesME 2020 (mbapi2020)](https://github.com/ReneNulschDE/m
 
 <img src="https://raw.githubusercontent.com/david40i9/ha-mercedes-ev-logbook/main/docs/images/name-place.png" alt="Naming a place: map with a resizable circle and suggested business names">
 
-**Charging:** sessions with energy, peak power and cost, and charging rates per place with their history.
+**Charging:** sessions with energy, peak power and cost, and charging rates per place (here Home with an off-peak window) with their history.
 
 <img src="https://raw.githubusercontent.com/david40i9/ha-mercedes-ev-logbook/main/docs/images/charging.png" alt="Charging tab">
 
@@ -86,7 +86,7 @@ Pick the car from the Mercedes integration and its sensors are filled in for you
 | EQS saloon / SUV | 107.8 – 108.4 |
 | EQV | 90 |
 
-Check your model year's spec sheet; capacities changed between versions. Everything can be changed later with **Configure**.
+Check your model year's spec sheet; capacities changed between versions. Choose the **currency** for charging costs (it starts as Home Assistant's). Everything can be changed later with **Configure**.
 
 ### What it uses
 
@@ -97,7 +97,7 @@ Check your model year's spec sheet; capacities changed between versions. Everyth
 | Trip distance counter | Optional | 0.1-mile/km trip distances when the odometer only reports whole units |
 | Charging active, charging power | Optional | Charging sessions and peak power |
 | Electricity price sensor | Optional | Live price for home charges (per kWh or MWh, pounds, pence, euros, cents, öre…; converted automatically). Without one, home charges use the rates you set in the Charging tab |
-| Home charger energy meter | Optional | The most accurate home energy and cost (any total-kWh sensor: Zappi, Wallbox, smart plug…) |
+| Home charger energy meter | Optional | The most accurate home energy (any total-kWh sensor: Zappi, Wallbox, smart plug…), costed at your Home rate or live price |
 | Outside temperature | Optional | Defaults to Home Assistant's weather for your home; or pick any temperature sensor |
 
 Any car that provides these entities works, not only Mercedes. Pick them yourself in the setup form.
