@@ -1,10 +1,10 @@
 {
   "domain": "mb_logbook",
   "name": "Mercedes EV Logbook",
+  "after_dependencies": ["mbapi2020"],
   "codeowners": ["@david40i9"],
   "config_flow": true,
   "dependencies": ["http", "frontend", "lovelace", "panel_custom", "recorder", "websocket_api", "zone"],
-  "after_dependencies": ["mbapi2020"],
   "documentation": "https://github.com/david40i9/ha-mercedes-ev-logbook",
   "integration_type": "device",
   "iot_class": "calculated",
