@@ -245,10 +245,10 @@ class MBLogbookCard extends HTMLElement {
         const form = admin
           ? `<div class=nameform>
                <span>New rate from</span><input type=date class=rdate value="${today}">
-               <input type=number class=rrate min=0 max=10000 step=0.001 placeholder="${esc(this._cur)} per kWh, e.g. 0.79">
+               <input type=number class=rrate min=0 max=10000 step=any placeholder="${esc(this._cur)} per kWh, e.g. 0.79">
                <label class=dim><input type=checkbox class=rfree> Free</label>
                <span class=offpeak><span>Off-peak (optional)</span>
-                 <input type=number class=roff min=0 max=10000 step=0.001 placeholder="per kWh, e.g. 0.07">
+                 <input type=number class=roff min=0 max=10000 step=any placeholder="per kWh, e.g. 0.07">
                  <span>from</span><input type=time class=roffs value="00:30"><span>to</span><input type=time class=roffe value="05:30"></span>
                <button class="primary rsave" data-loc="${i}">Add rate</button>
                <div class=dim>Charges from that date on use the new rate; earlier charges keep the rate they had. With an off-peak price, each charge is costed by how much of it fell in that window every day.${this._car?.has_price ? " Home charges use your live price sensor instead." : ""}</div>
@@ -449,7 +449,7 @@ class MBLogbookCard extends HTMLElement {
     return this._car?.currency || this._hass?.config?.currency || "EUR";
   }
 
-  /** Money in the car's currency, in the user's number format. perKwh: up to 3 decimals (7.5p, not 8p). */
+  /** Money in the car's currency, in the user's number format. perKwh: up to 4 decimals, as entered (0.6993, not 0.70). */
   _money(v, perKwh = false) {
     if (v == null) return "–";
     const cur = this._cur;
@@ -457,10 +457,10 @@ class MBLogbookCard extends HTMLElement {
       return new Intl.NumberFormat(this._hass.locale?.language, {
         style: "currency",
         currency: cur,
-        ...(perKwh ? { maximumFractionDigits: 3 } : {}),
+        ...(perKwh ? { maximumFractionDigits: 4 } : {}),
       }).format(v);
     } catch (e) {
-      return v.toFixed(perKwh ? 3 : 2);
+      return perKwh ? String(+v.toFixed(4)) : v.toFixed(2);
     }
   }
 
@@ -1192,7 +1192,7 @@ MBLogbookCard.css = `
   #mapbox ha-map { height: 100%; display: block; }
 `;
 
-const CARD_VERSION = "0.20.1";
+const CARD_VERSION = "0.20.2";
 
 if (!customElements.get("mb-logbook-card")) {
   customElements.define("mb-logbook-card", MBLogbookCard);
