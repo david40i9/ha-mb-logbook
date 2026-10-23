@@ -9,20 +9,24 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/david40i9/ha-mercedes-ev-logbook/releases"><img src="https://img.shields.io/github/v/release/david40i9/ha-mercedes-ev-logbook?style=flat-square" alt="Release"></a>
-  <a href="https://hacs.xyz"><img src="https://img.shields.io/badge/HACS-custom-41BDF5?style=flat-square" alt="HACS"></a>
-  <a href="https://github.com/david40i9/ha-mercedes-ev-logbook/actions/workflows/validate.yml"><img src="https://img.shields.io/github/actions/workflow/status/david40i9/ha-mercedes-ev-logbook/validate.yml?style=flat-square&label=validation" alt="Validation"></a>
+  <a href="https://github.com/david40i9/ha-mercedes-ev-logbook/releases"><img src="https://img.shields.io/github/v/release/david40i9/ha-mercedes-ev-logbook?style=flat-square&label=release" alt="release"></a>
+  <a href="https://hacs.xyz"><img src="https://img.shields.io/badge/HACS-custom-41BDF5?style=flat-square" alt="HACS custom"></a>
+  <a href="https://github.com/david40i9/ha-mercedes-ev-logbook/actions/workflows/validate.yml"><img src="https://img.shields.io/github/actions/workflow/status/david40i9/ha-mercedes-ev-logbook/validate.yml?style=flat-square&label=validation" alt="validation"></a>
   <img src="https://img.shields.io/badge/Home%20Assistant-2026.3%2B-18BCF2?style=flat-square" alt="Home Assistant 2026.3+">
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/david40i9/ha-mercedes-ev-logbook?style=flat-square" alt="MIT licence"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/licence-MIT-97CA00?style=flat-square" alt="MIT licence"></a>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/david40i9/ha-mercedes-ev-logbook/main/docs/images/overview.png" alt="The Mercedes EV Logbook overview page: monthly figures, mileage by label, and charts">
+  Built on <a href="https://github.com/ReneNulschDE/mbapi2020">MercedesME 2020 (mbapi2020)</a> by <a href="https://github.com/ReneNulschDE">@ReneNulschDE</a>. Thank you, René!
 </p>
 
 Every drive, park and charge of your EQA, EQB, EQE, EQS, EQV, electric CLA or other Mercedes EV, kept in Home Assistant for as long as you like: where you went, how far, how much battery and energy it took, what the car lost while parked, and what each charge cost. Label trips Business, Commute or Personal and export them for mileage claims.
 
-It builds on the [MercedesME 2020 (mbapi2020)](https://github.com/ReneNulschDE/mbapi2020) integration and never talks to Mercedes itself. Everything stays on your Home Assistant.
+It reads your car from René's integration and never talks to Mercedes itself. Everything stays on your Home Assistant.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/david40i9/ha-mercedes-ev-logbook/main/docs/images/overview.png" alt="The Mercedes EV Logbook overview page: monthly figures, mileage by label, and charts">
+</p>
 
 > *Screenshots use made-up demo data.*
 
@@ -175,6 +179,10 @@ Everything stays in Home Assistant. Places are named from your own zones and the
 
 - Mercedes reports battery % in whole numbers, so kWh for short trips is approximate (1% of a large battery is about 1 kWh).
 - The car sends its position about every two minutes while driving, so routes are drawn point to point.
+
+## Thanks
+
+This integration depends entirely on [MercedesME 2020 (mbapi2020)](https://github.com/ReneNulschDE/mbapi2020), which [René Nulsch (@ReneNulschDE)](https://github.com/ReneNulschDE) builds and maintains, connecting Mercedes me to Home Assistant. Every trip, charge and battery reading here comes through his work. If it helps you, consider supporting his project.
 
 ## Contributing
 
