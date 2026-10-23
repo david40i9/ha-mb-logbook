@@ -39,3 +39,4 @@ Ideas and planned work for Mercedes EV Logbook. Ranked roughly by value for effo
 - [x] Price sensors in pence, cents or per MWh converted (0.19)
 - [x] Costs from your own rates with an optional off-peak window, no price sensor needed; currency per car (0.20)
 - [x] Per-kWh prices shown as entered, up to 4 decimals (0.20.2)
+- [x] Two cars on one home charger meter: the meter is split between the cars charging at home by their charging power, never counted twice (0.21)

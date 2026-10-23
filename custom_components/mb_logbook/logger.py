@@ -647,6 +647,37 @@ class CarLogger:
         self._save()
         self._notify()
 
+    def _home_charge_power(self) -> float | None:
+        """This car's charging power now, while it has a home charge running (else None)."""
+        charge = self._state.get("charge")
+        if charge is None or not charge.get("at_home"):
+            return None
+        if "off_ts" in charge:
+            return 0.0  # stopped; the session closes shortly (a lone car keeps the meter's tail)
+        if self.conf.get(CONF_CHARGE_POWER):
+            return _num(self.hass.states.get(self.conf[CONF_CHARGE_POWER])) or 0.0
+        return 1.0  # no power sensor: counts as an equal share
+
+    def _meter_share(self) -> float:
+        """This car's share of a home meter step. Cars on the same meter that are both
+        charging at home split it by their charging power, so nothing is counted twice."""
+        mine = self._home_charge_power()
+        if mine is None:
+            return 0.0
+        powers = [mine]
+        meter = self.conf.get(CONF_CHARGER_ENERGY)
+        for entry in self.hass.config_entries.async_loaded_entries(DOMAIN):
+            other = entry.runtime_data
+            if other is self or not isinstance(other, CarLogger) or other.conf.get(CONF_CHARGER_ENERGY) != meter:
+                continue
+            p = other._home_charge_power()
+            if p is not None:
+                powers.append(p)
+        if len(powers) == 1:
+            return 1.0
+        total = sum(powers)
+        return mine / total if total > 0 else 1.0 / len(powers)
+
     @callback
     def _on_meter(self, event: Event[EventStateChangedData]) -> None:
         charge = self._state.get("charge")
@@ -658,6 +689,9 @@ class CarLogger:
             return
         step = new - old
         if step <= 0 or step > MAX_METER_STEP_KWH:
+            return
+        step *= self._meter_share()
+        if step <= 0:
             return
         price = None
         if self.conf.get(CONF_PRICE):
