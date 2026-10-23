@@ -47,6 +47,10 @@ It builds on the [MercedesME 2020 (mbapi2020)](https://github.com/ReneNulschDE/m
 
 <img src="https://raw.githubusercontent.com/david40i9/ha-mercedes-ev-logbook/main/docs/images/trips.png" alt="Trips tab">
 
+**Naming a place:** click *unnamed · name it* on any stop. Drag the pin and the circle's edge to fit the spot, type a name or press **Suggest names** for nearby shops and venues (from OpenStreetMap, only when you press it), and every past and future trip there takes the name.
+
+<img src="https://raw.githubusercontent.com/david40i9/ha-mercedes-ev-logbook/main/docs/images/name-place.png" alt="Naming a place: map with a resizable circle and suggested business names">
+
 **Charging:** sessions with energy, peak power and cost, and charging rates per place with their history.
 
 <img src="https://raw.githubusercontent.com/david40i9/ha-mercedes-ev-logbook/main/docs/images/charging.png" alt="Charging tab">
