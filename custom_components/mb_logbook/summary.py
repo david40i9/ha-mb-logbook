@@ -25,6 +25,17 @@ _LOGGER = logging.getLogger(__name__)
 PERSISTENT = "persistent_notification"
 
 
+# Symbols for common currencies; anything else shows its code ("123.45 SEK").
+_SYMBOLS = {"GBP": "£", "EUR": "€", "USD": "$", "AUD": "A$", "CAD": "C$", "NZD": "NZ$", "JPY": "¥", "CHF": "CHF "}
+_NO_DECIMALS = {"JPY", "KRW", "HUF", "ISK"}
+
+
+def _money(currency: str, value: float) -> str:
+    amount = f"{value:,.0f}" if currency in _NO_DECIMALS else f"{value:,.2f}"
+    symbol = _SYMBOLS.get(currency)
+    return f"{symbol}{amount}" if symbol else f"{amount} {currency}"
+
+
 def _last_month(now: datetime) -> tuple[datetime, datetime]:
     end = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     start = (end.replace(year=end.year - 1, month=12) if end.month == 1 else end.replace(month=end.month - 1))
@@ -51,7 +62,7 @@ async def async_build(hass: HomeAssistant, logger: CarLogger, now: datetime) -> 
         )
         lines.append(f"Used about {kwh:.0f} kWh driving ({eff})")
     if t["charges"]:
-        cost = f", {hass.config.currency} {t['charge_cost']:.2f}" if t["charge_cost"] else ""
+        cost = f", {_money(hass.config.currency, t['charge_cost'])}" if t["charge_cost"] else ""
         lines.append(f"Charged {t['charged_kwh']:.0f} kWh in {t['charges']} sessions{cost}")
     hours = sum(h for h, _ in parks)
     if hours:

@@ -207,9 +207,9 @@ def _descriptions(miles: bool, currency: str | None) -> list[LogbookSensorDescri
 def _currency(hass: HomeAssistant, price_entity: str | None) -> str | None:
     if not price_entity:
         return None
-    st = hass.states.get(price_entity)
-    unit = (st.attributes.get("unit_of_measurement") or "") if st else ""
-    return unit.split("/")[0] or hass.config.currency
+    # Costs are stored in whole currency units (a p/kWh or c/kWh price is converted),
+    # so they are in Home Assistant's own currency whatever the price sensor says.
+    return hass.config.currency
 
 
 async def async_setup_entry(

@@ -96,7 +96,7 @@ Check your model year's spec sheet; capacities changed between versions. Everyth
 | Ignition state | Optional | The most precise trip start and end (otherwise trips are detected from the car moving) |
 | Trip distance counter | Optional | 0.1-mile/km trip distances when the odometer only reports whole units |
 | Charging active, charging power | Optional | Charging sessions and peak power |
-| Electricity price sensor | Optional | Home charges costed at the live price |
+| Electricity price sensor | Optional | Home charges costed at the live price (per kWh or MWh, in pounds, pence, euros, cents, öre…; converted automatically) |
 | Home charger energy meter | Optional | The most accurate home energy and cost (any total-kWh sensor: Zappi, Wallbox, smart plug…) |
 | Outside temperature | Optional | Defaults to Home Assistant's weather for your home; or pick any temperature sensor |
 

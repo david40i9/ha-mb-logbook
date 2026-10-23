@@ -89,6 +89,29 @@ def _moved_m(old: State | None, new: State | None) -> float:
     return distance_m(a[0], a[1], b[0], b[1])
 
 
+# Price sensors in a currency's minor unit (pence, cents, öre...) per kWh.
+_MINOR_UNITS = {"p", "gbx", "pence", "c", "ct", "cent", "cents", "öre", "ore", "øre", "rp", "gr", "grosz", "kop", "hal"}
+
+
+def _price_of(state: State | None) -> float | None:
+    """A price sensor's value in whole currency per kWh, whatever unit it reports in:
+    £/kWh, p/kWh, c/kWh, ct/kWh, öre/kWh, €/MWh, ..."""
+    value = _num(state)
+    if value is None:
+        return None
+    unit = str(state.attributes.get("unit_of_measurement") or "").strip()
+    money, _, energy = unit.partition("/")
+    if energy.strip().lower() == "mwh":
+        value /= 1000
+    elif energy.strip().lower() == "wh":
+        value *= 1000
+    # "GBp" is pence but "GBP" is pounds, so only that one is case-sensitive.
+    m = money.strip()
+    if m == "GBp" or (m != "GBP" and m.lower() in _MINOR_UNITS):
+        value /= 100
+    return value
+
+
 def _to_km(value: float | None, state: State | None) -> float | None:
     if value is None or state is None:
         return None
@@ -638,7 +661,7 @@ class CarLogger:
             return
         price = None
         if self.conf.get(CONF_PRICE):
-            price = _num(self.hass.states.get(self.conf[CONF_PRICE]))
+            price = _price_of(self.hass.states.get(self.conf[CONF_PRICE]))
         charge["kwh_meter"] = (charge.get("kwh_meter") or 0.0) + step
         if price is not None:
             charge["cost"] = (charge.get("cost") or 0.0) + step * price
@@ -662,10 +685,10 @@ class CarLogger:
         charge = self._state.get("charge")
         if charge is None or "off_ts" in charge or not charge.get("pw_last"):
             return
-        rules.add_power_sample(charge, time.time(), None, _num(event.data["new_state"]))
+        rules.add_power_sample(charge, time.time(), None, _price_of(event.data["new_state"]))
         self._save()
 
     def _price(self) -> float | None:
         if not self.conf.get(CONF_PRICE):
             return None
-        return _num(self.hass.states.get(self.conf[CONF_PRICE]))
+        return _price_of(self.hass.states.get(self.conf[CONF_PRICE]))

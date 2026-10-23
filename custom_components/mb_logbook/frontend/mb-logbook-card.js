@@ -191,7 +191,7 @@ class MBLogbookCard extends HTMLElement {
   }
 
   _rateText(rate) {
-    return rate === 0 ? "Free" : `${this._money(rate)}/kWh`;
+    return rate === 0 ? "Free" : `${this._money(rate, true)}/kWh`;
   }
 
   /** Places tab: a default trip label for each place trips go to. */
@@ -241,7 +241,7 @@ class MBLogbookCard extends HTMLElement {
         const form = admin
           ? `<div class=nameform>
                <span>New rate from</span><input type=date class=rdate value="${today}">
-               <input type=number class=rrate min=0 max=10 step=0.001 placeholder="per kWh, e.g. 0.79">
+               <input type=number class=rrate min=0 max=10000 step=0.001 placeholder="${esc(this._hass.config.currency || "")} per kWh, e.g. 0.79">
                <label class=dim><input type=checkbox class=rfree> Free</label>
                <button class="primary rsave" data-loc="${i}">Add rate</button>
                <div class=dim>Charges from that date on use the new rate; earlier charges keep the rate they had. Metered home charges always use the meter.</div>
@@ -437,13 +437,18 @@ class MBLogbookCard extends HTMLElement {
     return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m` : `${m} min`;
   }
 
-  _money(v) {
+  /** Money in HA's currency and number format. perKwh: up to 3 decimals (7.5p, not 8p). */
+  _money(v, perKwh = false) {
     if (v == null) return "–";
     const cur = this._hass.config.currency || "GBP";
     try {
-      return new Intl.NumberFormat(this._hass.locale?.language, { style: "currency", currency: cur }).format(v);
+      return new Intl.NumberFormat(this._hass.locale?.language, {
+        style: "currency",
+        currency: cur,
+        ...(perKwh ? { maximumFractionDigits: 3 } : {}),
+      }).format(v);
     } catch (e) {
-      return v.toFixed(2);
+      return v.toFixed(perKwh ? 3 : 2);
     }
   }
 
@@ -495,7 +500,7 @@ class MBLogbookCard extends HTMLElement {
       ["Energy added", kwh ? `${kwh.toFixed(0)} kWh` : "–"],
       ["At home", ch.filter((c) => c.at_home).length],
       ["Charging cost", costed.length ? this._money(cost) + (uncosted ? ` <small class=dim>+${uncosted} unpriced</small>` : "") : "–"],
-      ["Average per kWh", cKwh ? this._money(cost / cKwh) : "–"],
+      ["Average per kWh", cKwh ? this._money(cost / cKwh, true) : "–"],
     ];
   }
 
@@ -748,7 +753,7 @@ class MBLogbookCard extends HTMLElement {
           <td class=n>${kwh != null ? kwh.toFixed(1) + " kWh" : "–"}<div class=dim>${src}</div></td>
           <td class=n>${c.max_power_kw ? c.max_power_kw.toFixed(1) + " kW" : "–"}</td>
           <td class=n>${this._money(c.cost)}<div class=dim>${{ meter: "metered", power: "live price", rate: "place rate", free: "free" }[c.cost_source] || (c.cost == null ? "no rate" : "")}</div></td>
-          <td class=n>${c.cost_source === "rate" || c.cost_source === "free" ? this._money(c.rate) : c.kwh_meter && c.cost ? this._money(c.cost / c.kwh_meter) : ""}</td>
+          <td class=n>${c.cost_source === "rate" || c.cost_source === "free" ? this._money(c.rate, true) : c.kwh_meter && c.cost ? this._money(c.cost / c.kwh_meter, true) : ""}</td>
         </tr>${formRow}`;
       })
       .join("");
@@ -1164,7 +1169,7 @@ MBLogbookCard.css = `
   #mapbox ha-map { height: 100%; display: block; }
 `;
 
-const CARD_VERSION = "0.18.0";
+const CARD_VERSION = "0.19.0";
 
 if (!customElements.get("mb-logbook-card")) {
   customElements.define("mb-logbook-card", MBLogbookCard);

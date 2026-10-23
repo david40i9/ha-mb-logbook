@@ -302,7 +302,7 @@ def _local_midnight(date_str: str) -> float:
         vol.Optional("rate_id"): int,
         vol.Required("location"): vol.All(str, vol.Strip, vol.Length(min=1, max=60)),
         vol.Required("valid_from"): str,  # YYYY-MM-DD, local
-        vol.Required("rate"): vol.All(vol.Coerce(float), vol.Range(min=0, max=10)),
+        vol.Required("rate"): vol.All(vol.Coerce(float), vol.Range(min=0, max=10000)),
     }
 )
 @websocket_api.async_response

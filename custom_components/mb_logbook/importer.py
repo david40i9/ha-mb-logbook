@@ -41,7 +41,7 @@ from .const import (
 )
 from . import rules
 from .temperature import temp_c, temp_source
-from .logger import MOVE_TRIGGER_M, STALE_MINUTES, CarLogger, _moved_m, _num, _to_km
+from .logger import MOVE_TRIGGER_M, STALE_MINUTES, CarLogger, _moved_m, _num, _price_of, _to_km
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -79,6 +79,10 @@ class _Replay:
     def _val(self, key: str) -> float | None:
         eid = self.conf.get(key)
         return _num(self.cur.get(eid)) if eid else None
+
+    def _price(self) -> float | None:
+        eid = self.conf.get(CONF_PRICE)
+        return _price_of(self.cur.get(eid)) if eid else None
 
     def _km(self, key: str) -> float | None:
         eid = self.conf.get(key)
@@ -190,7 +194,7 @@ class _Replay:
             "last_ts": ts,
         }
         if self.conf.get(CONF_CHARGE_POWER):
-            rules.add_power_sample(self.charge, ts, self._val(CONF_CHARGE_POWER) or 0.0, self._val(CONF_PRICE))
+            rules.add_power_sample(self.charge, ts, self._val(CONF_CHARGE_POWER) or 0.0, self._price())
         self.park["charged"] = True
 
     def end_charge(self) -> None:
@@ -310,10 +314,10 @@ class _Replay:
                     self.charge.pop("off_ts", None)
             elif self.charge is not None and "off_ts" not in self.charge:
                 self.charge["off_ts"] = ts
-                rules.add_power_sample(self.charge, ts, 0.0, self._val(CONF_PRICE))
+                rules.add_power_sample(self.charge, ts, 0.0, self._price())
         elif eid == c.get(CONF_PRICE):
             if self.charge is not None and "off_ts" not in self.charge and self.charge.get("pw_last"):
-                rules.add_power_sample(self.charge, ts, None, _num(st))
+                rules.add_power_sample(self.charge, ts, None, _price_of(st))
         elif eid == c.get(CONF_CHARGER_ENERGY):
             if self.charge is None or not self.charge["at_home"] or "off_ts" in self.charge:
                 return
@@ -321,7 +325,7 @@ class _Replay:
             if o is None or n is None or not 0 < n - o <= MAX_METER_STEP_KWH:
                 return
             self.charge["kwh_meter"] += n - o
-            price = self._val(CONF_PRICE)
+            price = self._price()
             if price is not None:
                 self.charge["cost"] += (n - o) * price
             self.charge["last_ts"] = ts
@@ -333,7 +337,7 @@ class _Replay:
                 if p and p > 0:
                     self.charge["last_ts"] = ts
                 if p is not None and "off_ts" not in self.charge:
-                    rules.add_power_sample(self.charge, ts, p, self._val(CONF_PRICE))
+                    rules.add_power_sample(self.charge, ts, p, self._price())
 
 
 async def async_import_history(
