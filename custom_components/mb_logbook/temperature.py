@@ -26,7 +26,7 @@ def temp_c(state: State | None, unit: str | None = None) -> float | None:
     """°C from a temperature sensor's state or a weather entity's attributes."""
     if state is None:
         return None
-    if state.domain == "weather":
+    if state.entity_id.startswith("weather."):
         value, unit = state.attributes.get("temperature"), state.attributes.get("temperature_unit")
     else:
         if state.state in UNKNOWN:
