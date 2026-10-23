@@ -82,11 +82,13 @@ class MBLogbookPanel extends HTMLElement {
     return this._miles ? "mi/kWh" : "kWh/100km";
   }
 
-  _money(v) {
+  /** whole: no decimals (chart labels, where 12 bars share the width). */
+  _money(v, whole = false) {
     try {
       return new Intl.NumberFormat(this._hass.locale?.language, {
         style: "currency",
         currency: this._car?.currency || this._hass.config.currency || "EUR",
+        ...(whole ? { maximumFractionDigits: 0, minimumFractionDigits: 0 } : {}),
       }).format(v);
     } catch (e) {
       return v.toFixed(2);
@@ -208,7 +210,7 @@ class MBLogbookPanel extends HTMLElement {
         ],
         (v) => v.toFixed(0)
       ),
-      this._chart("Charging cost", labels, [{ values: months.map((m) => m.cost), colour: "#f9e2af" }], (v) => this._money(v)),
+      this._chart("Charging cost", labels, [{ values: months.map((m) => m.cost), colour: "#f9e2af" }], (v) => this._money(v, true)),
       this._chart(`Efficiency (${this._effUnit})`, labels, [{ values: months.map((m) => eff(m) || 0), colour: "#cba6f7" }], (v) => (v ? v.toFixed(2) : "")),
       this._healthChart(months, labels),
       `<div class="section chart" id=tempeff><h2>Efficiency vs outside temperature</h2><div class=dim>Loading…</div></div>`,
@@ -416,10 +418,11 @@ class MBLogbookPanel extends HTMLElement {
         const h = v ? ((H - top - bottom) * Math.max(v - base, 0)) / (max - base) : 0;
         const x = i * slot + gap / 2 + si * bw;
         const y = H - bottom - h;
-        const last = i === n - 1 || allValues;
+        const latest = i === n - 1;
+        const last = latest || allValues;
         const name = String(labels[i]).split("\n")[0];
         bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${(bw - 1).toFixed(1)}" height="${Math.max(h, v ? 1 : 0).toFixed(1)}" rx="2" fill="${s.colour}" opacity="${last ? 1 : 0.75}"><title>${name}: ${fmt(v)}</title></rect>`;
-        if (last && v) vals += `<span class=val style="left:${(((x + bw / 2) / W) * 100).toFixed(2)}%;top:${((y / H) * 100).toFixed(2)}%">${fmt(v)}</span>`;
+        if (v) vals += `<span class="val${latest || allValues ? "" : " old"}" style="left:${(((x + bw / 2) / W) * 100).toFixed(2)}%;top:${((y / H) * 100).toFixed(2)}%">${fmt(v)}</span>`;
       });
     });
     // A label may have a second line ("5–10°\n9 trips").
@@ -524,6 +527,7 @@ MBLogbookPanel.css = `
   .chart .plot { position: relative; height: 170px; }
   .chart svg { width: 100%; height: 100%; display: block; overflow: visible; }
   .chart .val { position: absolute; transform: translate(-50%, -115%); font-size: 12px; font-weight: 600; color: var(--primary-text-color); white-space: nowrap; }
+  .chart .val.old { font-weight: 500; font-size: 10.5px; color: var(--secondary-text-color); }
   .chart .xl { display: flex; margin-top: 6px; }
   .chart .xl span { flex: 1; text-align: center; font-size: 12px; color: var(--secondary-text-color); line-height: 1.3; }
   .chart .xl small { display: block; font-size: 11px; opacity: .8; }
