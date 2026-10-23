@@ -221,6 +221,7 @@ class _Replay:
                 "soc_end": soc_end,
                 "kwh_car": kwh_car,
                 "kwh_meter": round(meter, 3) if meter > 0 else None,
+                "kwh_power": round(c["kwh_power"], 3) if c["at_home"] and (c.get("kwh_power") or 0) > 0 else None,
                 "cost": cost,
                 "cost_basis": basis,
                 "max_power_kw": c["max_power_kw"] or None,

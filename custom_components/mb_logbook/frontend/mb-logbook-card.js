@@ -3,6 +3,8 @@
  * <ha-map>, so it uses the same map tiles as HA's map card and nothing else. */
 
 const KM_PER_MI = 1.609344;
+// Where a charging session's kWh came from (best first).
+const SRC = { meter: "metered", power: "from charging power", battery: "from battery %" };
 // Calendar periods; the arrows step back and forward by one period.
 const PERIODS = [
   ["week", "Week"],
@@ -501,10 +503,10 @@ class MBLogbookCard extends HTMLElement {
 
   _chargeTiles() {
     const ch = this._charges;
-    const kwh = ch.reduce((s, c) => s + (c.kwh_meter ?? c.kwh_car ?? 0), 0);
+    const kwh = ch.reduce((s, c) => s + (c.kwh ?? c.kwh_meter ?? c.kwh_car ?? 0), 0);
     // Costed charges: metered at home, or at a charging place's rate (free counts as 0).
     const costed = ch.filter((c) => c.cost != null);
-    const cKwh = costed.reduce((s, c) => s + (c.kwh_meter ?? c.kwh_car ?? 0), 0);
+    const cKwh = costed.reduce((s, c) => s + (c.kwh ?? c.kwh_meter ?? c.kwh_car ?? 0), 0);
     const cost = costed.reduce((s, c) => s + c.cost, 0);
     const uncosted = ch.length - costed.length;
     return [
@@ -614,7 +616,7 @@ class MBLogbookCard extends HTMLElement {
     for (const c of [...this._charges].sort((a, b) => a.start_ts - b.start_ts)) {
       const s = new Date(c.start_ts * 1000);
       const e = new Date(c.end_ts * 1000);
-      const kwh = c.kwh_meter ?? c.kwh_car;
+      const kwh = c.kwh ?? c.kwh_meter ?? c.kwh_car;
       const per = c.cost_source === "rate" || c.cost_source === "free" ? c.rate : c.kwh_meter && c.cost ? c.cost / c.kwh_meter : null;
       rows.push([
         s.toLocaleDateString(loc),
@@ -626,7 +628,7 @@ class MBLogbookCard extends HTMLElement {
         c.soc_start ?? "",
         c.soc_end ?? "",
         kwh != null ? kwh.toFixed(2) : "",
-        c.kwh_meter != null ? "metered" : "from battery %",
+        SRC[c.kwh_source] || "from battery %",
         c.max_power_kw ? c.max_power_kw.toFixed(1) : "",
         c.cost != null ? c.cost.toFixed(2) : "",
         { meter: "metered", power: "live price", rate: "place rate", free: "free" }[c.cost_source] || "",
@@ -653,7 +655,7 @@ class MBLogbookCard extends HTMLElement {
 
   /** A charging session shown in the trip list, between the trips around it. */
   _chargeLine(c) {
-    const kwh = c.kwh_meter ?? c.kwh_car;
+    const kwh = c.kwh ?? c.kwh_meter ?? c.kwh_car;
     const t = (ts) => this._time(ts);
     const bits = [
       `${t(c.start_ts)}–${t(c.end_ts)}`,
@@ -746,14 +748,14 @@ class MBLogbookCard extends HTMLElement {
       start: (c) => c.start_ts,
       where: (c) => c.place || null,
       soc: (c) => (c.soc_start != null && c.soc_end != null ? c.soc_end - c.soc_start : null),
-      kwh: (c) => c.kwh_meter ?? c.kwh_car,
+      kwh: (c) => c.kwh ?? c.kwh_meter ?? c.kwh_car,
       peak: (c) => c.max_power_kw || null,
       cost: (c) => c.cost,
       perkwh: (c) => (c.cost_source === "rate" || c.cost_source === "free" ? c.rate : c.kwh_meter && c.cost ? c.cost / c.kwh_meter : null),
     })
       .map((c) => {
-        const kwh = c.kwh_meter ?? c.kwh_car;
-        const src = c.kwh_meter != null ? "metered" : "from battery %";
+        const kwh = c.kwh ?? c.kwh_meter ?? c.kwh_car;
+        const src = SRC[c.kwh_source] || (c.kwh_meter != null ? "metered" : "from battery %");
         const naming = this._naming && this._naming.kind === "charge" && this._naming.id === c.id;
         const formRow = naming
           ? `<tr class=maprow><td colspan=7>${this._nameForm(c.lat, c.lon)}<div id=mapbox class=small></div></td></tr>`
@@ -1192,7 +1194,7 @@ MBLogbookCard.css = `
   #mapbox ha-map { height: 100%; display: block; }
 `;
 
-const CARD_VERSION = "0.21.1";
+const CARD_VERSION = "0.22.0";
 
 if (!customElements.get("mb-logbook-card")) {
   customElements.define("mb-logbook-card", MBLogbookCard);

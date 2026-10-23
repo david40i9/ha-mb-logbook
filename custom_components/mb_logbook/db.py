@@ -102,6 +102,8 @@ MIGRATIONS = (
     ("charge_rates", "offpeak_rate", "REAL"),
     ("charge_rates", "offpeak_start", "TEXT"),
     ("charge_rates", "offpeak_end", "TEXT"),
+    # kWh from the car's charging power over the session (home, without a meter)
+    ("charges", "kwh_power", "REAL"),
 )
 
 TRIP_COLS = (
@@ -111,7 +113,7 @@ TRIP_COLS = (
     "park_hours", "park_drain_hours", "park_soc_drop", "park_charged", "points", "temp_c",
 )
 CHARGE_COLS = (
-    "car", "start_ts", "end_ts", "soc_start", "soc_end", "kwh_car", "kwh_meter",
+    "car", "start_ts", "end_ts", "soc_start", "soc_end", "kwh_car", "kwh_meter", "kwh_power",
     "cost", "max_power_kw", "place", "at_home", "lat", "lon", "cost_basis",
 )
 
@@ -156,6 +158,15 @@ def _offpeak_share(start_ts: float, end_ts: float, start: str, end: str) -> floa
         inside += max(0.0, min(end_ts, w1) - max(start_ts, w0))
         day += timedelta(days=1)
     return min(1.0, inside / (end_ts - start_ts))
+
+
+def charge_energy(c: dict[str, Any]) -> tuple[float | None, str | None]:
+    """A session's kWh and where it came from, best first: a home charger meter, the
+    car's charging power over the session, then the battery % gained x capacity."""
+    for key, source in (("kwh_meter", "meter"), ("kwh_power", "power"), ("kwh_car", "battery")):
+        if c.get(key):
+            return c[key], source
+    return None, None
 
 
 def rate_for(entry: dict[str, Any], start_ts: float, end_ts: float | None) -> float:
@@ -557,6 +568,7 @@ class LogbookDB:
             if d.get("place") is None and (p := match_place(places, d.get("lat"), d.get("lon"))):
                 d["place"] = p["name"]
                 d["place_id"] = p["id"]
+            d["kwh"], d["kwh_source"] = charge_energy(d)
             self._apply_rate(d, rates)
             out.append(d)
         return out
@@ -570,7 +582,7 @@ class LogbookDB:
             d["cost_source"] = d.get("cost_basis") or "meter"
             return
         d["cost_source"] = None
-        kwh = d.get("kwh_meter") or d.get("kwh_car")
+        kwh = d.get("kwh")
         entry = rate_at(rates.get(d.get("place") or "", []), d["start_ts"])
         if entry is None or kwh is None:
             return
@@ -638,7 +650,7 @@ class LogbookDB:
             "soc_used": t["soc_used"],
             "distance_km_with_soc": t["km_with_soc"],
             "charges": len(ch),
-            "charged_kwh": sum((c.get("kwh_meter") or c.get("kwh_car") or 0) for c in ch),
+            "charged_kwh": sum((c.get("kwh") or 0) for c in ch),
             "charge_cost": sum((c.get("cost") or 0) for c in ch),
         }
 

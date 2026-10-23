@@ -104,7 +104,7 @@ class Stats:
             "idle_drain": round(drain, 2) if drain is not None else None,
             "idle_samples": len(raw["parks"]),
             "last_charge_energy": (
-                (charge.get("kwh_meter") or charge.get("kwh_car")) if charge else None
+                charge.get("kwh") if charge else None
             ),
             "last_charge_cost": round(charge["cost"], 2) if charge and charge.get("cost") else None,
             "last_charge": charge,
@@ -145,6 +145,8 @@ def _charge_attrs(d: dict[str, Any]) -> dict[str, Any]:
         "battery_end": c.get("soc_end"),
         "energy_added_car": c.get("kwh_car"),
         "energy_metered": c.get("kwh_meter"),
+        "energy_from_power": c.get("kwh_power"),
+        "energy_source": c.get("kwh_source"),
         "place": c.get("place"),
     }
 

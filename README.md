@@ -95,9 +95,9 @@ Check your model year's spec sheet; capacities changed between versions. Choose 
 | Odometer, battery %, GPS tracker | **Yes** | Trips, distance, energy and routes |
 | Ignition state | Optional | The most precise trip start and end (otherwise trips are detected from the car moving) |
 | Trip distance counter | Optional | 0.1-mile/km trip distances when the odometer only reports whole units |
-| Charging active, charging power | Optional | Charging sessions and peak power |
+| Charging active, charging power | Optional | Charging sessions, peak power, and home kWh when there is no charger meter |
 | Electricity price sensor | Optional | Live price for home charges (per kWh or MWh, pounds, pence, euros, cents, öre…; converted automatically). Without one, home charges use the rates you set in the Charging tab |
-| Home charger energy meter | Optional | The most accurate home energy (any total-kWh sensor: Zappi, Wallbox, smart plug…), costed at your Home rate or live price |
+| Home charger energy meter | Optional | The most accurate home energy, losses included (any total-kWh sensor: Zappi, Wallbox, Ohme, smart plug, CT clamp…). Without one, home kWh comes from the car's charging power over the session, else its battery % |
 | Outside temperature | Optional | Defaults to Home Assistant's weather for your home; or pick any temperature sensor |
 
 Any car that provides these entities works, not only Mercedes. Pick them yourself in the setup form.

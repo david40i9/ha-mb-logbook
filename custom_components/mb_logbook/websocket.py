@@ -415,7 +415,7 @@ async def ws_stats(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None
         if mo is None:
             continue
         mo["charges"] += 1
-        mo["charged_kwh"] += c.get("kwh_meter") or c.get("kwh_car") or 0
+        mo["charged_kwh"] += c.get("kwh") or 0
         mo["cost"] += c.get("cost") or 0
     for key, mo in months.items():
         vals = sorted(projected.get(key, []))

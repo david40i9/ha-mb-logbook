@@ -633,6 +633,7 @@ class CarLogger:
             "soc_end": soc_end,
             "kwh_car": kwh_car,
             "kwh_meter": round(meter, 3) if meter > 0 else None,
+            "kwh_power": round(charge["kwh_power"], 3) if charge.get("at_home") and (charge.get("kwh_power") or 0) > 0 else None,
             "cost": cost,
             "cost_basis": basis,
             "max_power_kw": charge.get("max_power_kw") or None,
