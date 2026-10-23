@@ -6,7 +6,7 @@ Ideas and planned work for Mercedes EV Logbook. Ranked roughly by value for effo
 
 1. **Drain detail**: idle drain by place and by month (where the car loses most while parked), flagging parks with pre-climate. *(TeslaMate vampire drain dashboard; the "Stats" app shows drain per location.)*
 2. **Off-peak share and saving**: how much home charging fell in the off-peak window, and what it would have cost at the peak rate. Uses the off-peak rates from the Charging tab or the live price recorded per session. *(evcc's cheapest-slot planning, turned into a report.)*
-3. **Visited places map and timeline**: all trip ends as a heat map, and a day-by-day timeline. *(TeslaMate "visited" dashboard.)*
+3. **Day-by-day timeline** of trips and stops (the heat map part is done). *(TeslaMate "visited" dashboard.)*
 4. **Charging curve** for rapid charges: store power samples during a session and plot power against battery %. *(TeslaMate charge detail.)* Needs more frequent data than the car may send.
 5. **HACS default list**: requested; waiting for review.
 
@@ -41,3 +41,4 @@ Ideas and planned work for Mercedes EV Logbook. Ranked roughly by value for effo
 - [x] Per-kWh prices shown as entered, up to 4 decimals (0.20.2)
 - [x] Two cars on one home charger meter: the meter is split between the cars charging at home by their charging power, never counted twice (0.21)
 - [x] Without a charger meter, home kWh and costs come from the car's charging power over the session instead of battery % (0.22)
+- [x] "Where you go" heat map of trip ends on the overview; battery size pre-filled from the car model at setup (0.23)

@@ -27,6 +27,7 @@ from homeassistant.helpers.selector import (
     TextSelector,
 )
 
+from .models import capacity_for_model
 from .const import (
     CONF_CAPACITY,
     CONF_CAR_NAME,
@@ -177,6 +178,7 @@ class MBLogbookConfigFlow(ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         self._defaults: dict[str, Any] = {}
         self._vin: str | None = None
+        self._model: str | None = None
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
@@ -187,6 +189,10 @@ class MBLogbookConfigFlow(ConfigFlow, domain=DOMAIN):
                 device = dr.async_get(self.hass).async_get(device_id)
                 if device:
                     self._defaults[CONF_CAR_NAME] = device.name_by_user or device.name or ""
+                    # Pre-fill the usable battery size from the model name (checked by the user).
+                    if (kwh := capacity_for_model(device.model)) and not self._defaults.get(CONF_CAPACITY):
+                        self._defaults[CONF_CAPACITY] = kwh
+                        self._model = device.model
                 self._defaults[CONF_DISTANCE_UNIT] = _unit_from(
                     self.hass, found.get(CONF_ODOMETER)
                 )
@@ -220,6 +226,9 @@ class MBLogbookConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="entities",
             data_schema=_schema(self.hass, self._defaults, with_name=True),
             errors=errors,
+            description_placeholders={
+                "model_note": f" Battery capacity was filled in for the {self._model}; check it against your car." if self._model else ""
+            },
         )
 
     @staticmethod

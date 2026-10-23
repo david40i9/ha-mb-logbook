@@ -16,6 +16,7 @@ class MBLogbookPanel extends HTMLElement {
     this._view = "overview";
     this._mPeriod = "month"; // mileage-by-label period
     this._mOffset = 0;
+    this._hPeriod = "year"; // heat map period
   }
 
   set hass(hass) {
@@ -229,8 +230,10 @@ class MBLogbookPanel extends HTMLElement {
       <div class=grid2>
         <div class=section><h2>Routes this month <span class=dim>(${routes.length} trips)</span></h2><div id=mapbox></div></div>
         <div class=section><h2>Most visited <span class=dim>(last 12 months)</span></h2>${top}</div>
-      </div>`;
+      </div>
+      <div class=section id=heat></div>`;
     this._loadMileage();
+    this._loadHeat();
     this._loadTempEff();
     this._drawRoutes(routes);
   }
@@ -439,6 +442,133 @@ class MBLogbookPanel extends HTMLElement {
     return `<div class="section chart"><h2>${title}</h2>${legend}<div class=plot><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${bars}</svg>${vals}</div><div class=xl>${xl}</div></div>`;
   }
 
+  /** "Where you go": a heat map of every trip's end point for a chosen period. */
+  async _loadHeat() {
+    const box = this.shadowRoot.getElementById("heat");
+    if (!box) return;
+    const car = this._car;
+    const periods = [["month", "Month"], ["quarter", "3 months"], ["year", "Year"], ["all", "All time"]];
+    const now = new Date();
+    const start = {
+      month: new Date(now.getFullYear(), now.getMonth(), 1),
+      quarter: new Date(now.getFullYear(), now.getMonth() - 2, 1),
+      year: new Date(now.getFullYear() - 1, now.getMonth() + 1, 1),
+      all: new Date(2000, 0, 1),
+    }[this._hPeriod] / 1000;
+    const head = (n) => `<div class=mhead><h2>Where you go ${n != null ? `<span class=dim>(${n} stops)</span>` : ""}</h2>
+        <div class=seg>${periods.map(([v, l]) => `<button data-hp="${v}" class="${v === this._hPeriod ? "on" : ""}">${l}</button>`).join("")}</div></div>`;
+    box.innerHTML = `${head()}<div id=heatbox><div class=empty>Loading…</div></div>`;
+    this._wireHeat(box);
+    let trips;
+    try {
+      trips = await this._hass.callWS({ type: "mb_logbook/trips", entry_id: car.entry_id, start, end: Date.now() / 1000 + 86400 });
+    } catch (e) {
+      box.querySelector("#heatbox").innerHTML = `<div class=empty>Couldn't load trips.</div>`;
+      return;
+    }
+    if (this._car !== car) return;
+    const pts = trips.filter((t) => t.end_lat != null && t.end_lon != null).map((t) => [t.end_lat, t.end_lon]);
+    box.querySelector("h2").outerHTML = head(pts.length).match(/<h2>.*<\/h2>/s)[0];
+    const hb = box.querySelector("#heatbox");
+    if (!pts.length) {
+      hb.innerHTML = `<div class=empty>No trips in this period.</div>`;
+      return;
+    }
+    const map = await this._newMap(hb);
+    if (!map) return;
+    const ml = map._engine?._map; // MapLibre map inside HA's <ha-map> (not a public API)
+    if (!ml || typeof ml.addLayer !== "function") {
+      hb.innerHTML = `<div class=empty>The heat map needs Home Assistant's newer map (MapLibre), which this browser or version isn't using.</div>`;
+      return;
+    }
+    const data = {
+      type: "FeatureCollection",
+      features: pts.map(([lat, lon]) => ({ type: "Feature", geometry: { type: "Point", coordinates: [lon, lat] }, properties: {} })),
+    };
+    const add = () => {
+      if (ml.getSource("mb-heat")) return;
+      ml.addSource("mb-heat", { type: "geojson", data });
+      ml.addLayer({
+        id: "mb-heat",
+        type: "heatmap",
+        source: "mb-heat",
+        paint: {
+          // Each stop adds the same weight; nearby stops build up into hot spots.
+          "heatmap-weight": 1,
+          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 5, 0.6, 15, 2],
+          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 5, 6, 10, 16, 15, 34],
+          "heatmap-opacity": 0.85,
+          "heatmap-color": [
+            "interpolate", ["linear"], ["heatmap-density"],
+            0, "rgba(0,0,0,0)",
+            0.15, "rgba(137,180,250,0.55)",
+            0.35, "rgb(116,199,236)",
+            0.55, "rgb(166,227,161)",
+            0.75, "rgb(249,226,175)",
+            0.9, "rgb(250,179,135)",
+            1, "rgb(243,139,168)",
+          ],
+        },
+      });
+    };
+    add();
+    // HA redraws the map style when the theme changes; put the layer back.
+    ml.on("styledata", () => {
+      try {
+        add();
+      } catch (e) {
+        /* style still loading */
+      }
+    });
+    // Fit to the middle 95% of stops so one long trip doesn't zoom the map right out.
+    const sorted = (i) => pts.map((p) => p[i]).sort((a, b) => a - b);
+    const q = (arr, f) => arr[Math.min(arr.length - 1, Math.max(0, Math.floor(f * (arr.length - 1))))];
+    const la = sorted(0);
+    const lo = sorted(1);
+    map.fitBounds(
+      [
+        [q(la, 0.025), q(lo, 0.025)],
+        [q(la, 0.975), q(lo, 0.975)],
+      ],
+      { zoom: 15, pad: 0.15 }
+    );
+  }
+
+  _wireHeat(box) {
+    box.querySelectorAll("button[data-hp]").forEach((b) =>
+      b.addEventListener("click", () => {
+        this._hPeriod = b.dataset.hp;
+        this._loadHeat();
+      })
+    );
+  }
+
+  /** A loaded <ha-map> in `box`, or null (with a message) if HA's map isn't available. */
+  async _newMap(box) {
+    if (!customElements.get("ha-map")) {
+      try {
+        const helpers = await window.loadCardHelpers();
+        helpers.createCardElement({ type: "map", entities: ["zone.home"] });
+        await Promise.race([customElements.whenDefined("ha-map"), new Promise((r) => setTimeout(r, 5000))]);
+      } catch (e) {
+        /* fall through */
+      }
+    }
+    if (!customElements.get("ha-map")) {
+      box.innerHTML = `<div class=empty>Map unavailable.</div>`;
+      return null;
+    }
+    const map = document.createElement("ha-map");
+    map.hass = this._hass;
+    map.autoFit = false;
+    map.fitZones = false;
+    box.innerHTML = "";
+    box.appendChild(map);
+    for (let i = 0; i < 60 && !map._loaded; i++) await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 150));
+    return map;
+  }
+
   async _drawRoutes(routes) {
     const box = this.shadowRoot.getElementById("mapbox");
     if (!box) return;
@@ -536,6 +666,8 @@ MBLogbookPanel.css = `
   .legend { display: flex; gap: 14px; font-size: .8em; color: var(--secondary-text-color); margin: -4px 0 6px; }
   .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
   #mapbox { height: 380px; border-radius: 10px; overflow: hidden; }
+  #heatbox { height: 460px; border-radius: 10px; overflow: hidden; }
+  #heatbox ha-map { display: block; height: 100%; }
   #mapbox ha-map { display: block; height: 100%; }
   table.places { width: 100%; border-collapse: collapse; }
   table.places td { padding: 6px 4px; border-bottom: 1px solid var(--divider-color); }

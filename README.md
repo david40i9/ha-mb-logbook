@@ -35,6 +35,7 @@ It builds on the [MercedesME 2020 (mbapi2020)](https://github.com/ReneNulschDE/m
 | ⚡ **Charging** | Every session with kWh, peak power and cost, from your own rates per place (with an optional off-peak window) or a live price sensor; rate history keeps old costs right |
 | 🏷️ **Mileage claims** | Business / Commute / Personal labels, a default label per place, mileage by label and CSV export |
 | 📍 **Your own places** | Name any stop with a draggable, resizable circle; the name reaches back through all your history |
+| 🔥 **Where you go** | A heat map of every stop: by month, 3 months, year or all time |
 | 🔋 **Battery health** | The range the car predicts at 100%, month by month |
 | 🌡️ **Efficiency vs temperature** | How much winter really costs you, from Home Assistant's own weather |
 | 🕘 **Your past trips too** | On install it rebuilds earlier trips and charges from Home Assistant's history |
@@ -75,7 +76,7 @@ The **Mercedes EV Logbook** page appears in the sidebar, and the card is registe
 
 ## Setup
 
-Pick the car from the Mercedes integration and its sensors are filled in for you. Enter the **usable battery capacity** in kWh:
+Pick the car from the Mercedes integration and its sensors are filled in for you, along with the **usable battery capacity** for its model (check it: capacities changed between model years):
 
 | Model | Usable kWh (approx.) |
 |---|---|
@@ -104,7 +105,7 @@ Any car that provides these entities works, not only Mercedes. Pick them yoursel
 
 ## Using it
 
-**Sidebar page.** *Overview* shows this month against last; mileage by label for any week, month, 3 months or year; 12-month charts of distance, energy, charging cost and efficiency; battery health; efficiency against outside temperature; this month's routes; and your most-visited places. *Logbook* is the full card for the selected car.
+**Sidebar page.** *Overview* shows this month against last; mileage by label for any week, month, 3 months or year; 12-month charts of distance, energy, charging cost and efficiency; battery health; efficiency against outside temperature; this month's routes; your most-visited places; and a heat map of where you go. *Logbook* is the full card for the selected car.
 
 **Trips.** Click a trip to see its route. Choose a label from the dropdown, or give a place a default label (Places tab) and trips there are labelled automatically. Filter by label and the totals follow; **Export CSV** saves the trips shown.
 
