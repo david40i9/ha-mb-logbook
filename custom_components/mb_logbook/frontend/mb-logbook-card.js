@@ -1179,7 +1179,7 @@ MBLogbookCard.css = `
   .nameform { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0 10px; }
   .offpeak { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .nameform label { display: inline-flex; align-items: center; gap: 4px; }
-  .nameform input[type=checkbox] { width: auto; margin: 0; }
+  .nameform input[type=checkbox] { flex: none; min-width: 0; width: auto; margin: 0; }
   .nameform input, td input.pn { flex: 1; min-width: 160px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); font: inherit; }
   .nameform select, td select.pr { padding: 6px; border-radius: 8px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); font: inherit; }
   .nameform button, td button.psv, td button.pdel { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--divider-color); background: none; color: var(--primary-text-color); font: inherit; cursor: pointer; }
@@ -1192,7 +1192,7 @@ MBLogbookCard.css = `
   #mapbox ha-map { height: 100%; display: block; }
 `;
 
-const CARD_VERSION = "0.20.0";
+const CARD_VERSION = "0.20.1";
 
 if (!customElements.get("mb-logbook-card")) {
   customElements.define("mb-logbook-card", MBLogbookCard);
