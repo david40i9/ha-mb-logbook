@@ -359,8 +359,8 @@ class MBLogbookPanel extends HTMLElement {
     const base = Math.floor((Math.min(...have) * 0.9) / 10) * 10;
     const first = have[0];
     const last = have[have.length - 1];
-    const note = have.length > 1 ? `<div class=dim>${last >= first ? "+" : "−"}${Math.abs(((last - first) / first) * 100).toFixed(1)}% since ${labels[vals.indexOf(first)]}. The car's range also moves with driving style and temperature, so look at the trend over months.</div>` : "";
-    return this._chart(title, labels, [{ values: vals, colour: "#94e2d5" }], (v) => (v ? v.toFixed(0) : ""), base).replace("</svg></div>", `</svg>${note}</div>`);
+    const note = have.length > 1 ? `<div class="dim note">${last >= first ? "+" : "−"}${Math.abs(((last - first) / first) * 100).toFixed(1)}% since ${labels[vals.indexOf(first)]}. The car's range also moves with driving style and temperature, so look at the trend over months.</div>` : "";
+    return this._chart(title, labels, [{ values: vals, colour: "#94e2d5" }], (v) => (v ? v.toFixed(0) : ""), base).replace(/<\/div><\/div>$/, `</div>${note}</div>`);
   }
 
   async _loadTempEff() {
@@ -384,49 +384,56 @@ class MBLogbookPanel extends HTMLElement {
       box.querySelector(".dim").textContent = `No trips with a temperature from ${res.name} yet. Each new trip records it; older trips only as far back as Home Assistant keeps history.`;
       return;
     }
-    const lbl = (b) => (b.lo < -50 ? `<${b.hi}°` : b.hi > 50 ? `≥${b.lo}°` : `${b.lo}–${b.hi}°`);
+    const lbl = (b) => (b.lo < -50 ? `below ${b.hi}°C` : b.hi > 50 ? `${b.lo}°C +` : `${b.lo}–${b.hi}°C`);
     const html = this._chart(
       `Efficiency vs outside temperature (${this._effUnit})`,
-      bands.map(lbl),
+      bands.map((b) => `${lbl(b)}\n${b.trips} trip${b.trips === 1 ? "" : "s"}`),
       [{ values: bands.map((b) => this._eff(b.km, b.kwh) || 0), colour: "#89dceb" }],
       (v) => (v ? v.toFixed(2) : ""),
       0,
       true
-    ).replace("</svg></div>", `</svg><div class=dim>${bands.map((b) => `${lbl(b)}: ${b.trips} trips`).join(" · ")} (trips of 5 km or more; temperature from ${escp(res.name)} at the start)</div></div>`);
+    ).replace(/<\/div><\/div>$/, `</div><div class="dim note">Temperature when each trip started, from ${escp(res.name)}. Trips under 5 km are left out.</div></div>`);
     box.outerHTML = html.replace('<div class="section chart">', '<div class="section chart" id=tempeff>');
   }
 
   /** Grouped bar chart as inline SVG. series: [{name?, values[], colour}]. base: value at the
    * bottom of the bars (0 normally). allValues: label every bar, not just the last. */
   _chart(title, labels, series, fmt, base = 0, allValues = false) {
+    // Bars are drawn in a stretched SVG; text sits in HTML on top so it never stretches.
     const W = 600;
-    const H = 200;
-    const top = 18;
-    const bottom = 22;
+    const H = 170;
+    const top = 20;
+    const bottom = 0;
     const n = labels.length;
     const max = Math.max(base + 1e-9, ...series.flatMap((s) => s.values));
     const slot = W / n;
     const gap = slot * 0.25;
     const bw = (slot - gap) / series.length;
     let bars = "";
+    let vals = "";
     series.forEach((s, si) => {
       s.values.forEach((v, i) => {
         const h = v ? ((H - top - bottom) * Math.max(v - base, 0)) / (max - base) : 0;
         const x = i * slot + gap / 2 + si * bw;
         const y = H - bottom - h;
         const last = i === n - 1 || allValues;
-        bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${(bw - 1).toFixed(1)}" height="${Math.max(h, v ? 1 : 0).toFixed(1)}" rx="2" fill="${s.colour}" opacity="${last ? 1 : 0.75}"><title>${labels[i]}: ${fmt(v)}</title></rect>`;
-        if (last && v) bars += `<text x="${(x + bw / 2).toFixed(1)}" y="${(y - 4).toFixed(1)}" class=val>${fmt(v)}</text>`;
+        const name = String(labels[i]).split("\n")[0];
+        bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${(bw - 1).toFixed(1)}" height="${Math.max(h, v ? 1 : 0).toFixed(1)}" rx="2" fill="${s.colour}" opacity="${last ? 1 : 0.75}"><title>${name}: ${fmt(v)}</title></rect>`;
+        if (last && v) vals += `<span class=val style="left:${(((x + bw / 2) / W) * 100).toFixed(2)}%;top:${((y / H) * 100).toFixed(2)}%">${fmt(v)}</span>`;
       });
     });
+    // A label may have a second line ("5–10°\n9 trips").
     const xl = labels
-      .map((l, i) => `<text x="${(i * slot + slot / 2).toFixed(1)}" y="${H - 6}" class=lbl>${l}</text>`)
+      .map((l) => {
+        const [a, b] = String(l).split("\n");
+        return `<span>${a}${b ? `<small>${b}</small>` : ""}</span>`;
+      })
       .join("");
     const legend =
       series.length > 1
         ? `<div class=legend>${series.map((s) => `<span><i style="background:${s.colour}"></i>${s.name}</span>`).join("")}</div>`
         : "";
-    return `<div class="section chart"><h2>${title}</h2>${legend}<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${bars}${xl}</svg></div>`;
+    return `<div class="section chart"><h2>${title}</h2>${legend}<div class=plot><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${bars}</svg>${vals}</div><div class=xl>${xl}</div></div>`;
   }
 
   async _drawRoutes(routes) {
@@ -514,9 +521,14 @@ MBLogbookPanel.css = `
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 0 16px; }
   .grid2 { display: grid; grid-template-columns: 2fr 1fr; gap: 0 16px; }
   @media (max-width: 900px) { .grid, .grid2 { grid-template-columns: 1fr; } }
-  .chart svg { width: 100%; height: 200px; display: block; }
-  .chart .lbl { fill: var(--secondary-text-color); font-size: 12px; text-anchor: middle; }
-  .chart .val { fill: var(--primary-text-color); font-size: 12px; text-anchor: middle; font-weight: 600; }
+  .chart .plot { position: relative; height: 170px; }
+  .chart svg { width: 100%; height: 100%; display: block; overflow: visible; }
+  .chart .val { position: absolute; transform: translate(-50%, -115%); font-size: 12px; font-weight: 600; color: var(--primary-text-color); white-space: nowrap; }
+  .chart .xl { display: flex; margin-top: 6px; }
+  .chart .xl span { flex: 1; text-align: center; font-size: 12px; color: var(--secondary-text-color); line-height: 1.3; }
+  .chart .xl small { display: block; font-size: 11px; opacity: .8; }
+  .chart .note { margin-top: 8px; }
+  .mchart .plot { height: 150px; }
   .legend { display: flex; gap: 14px; font-size: .8em; color: var(--secondary-text-color); margin: -4px 0 6px; }
   .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
   #mapbox { height: 380px; border-radius: 10px; overflow: hidden; }
