@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 DOMAIN = "mb_logbook"
-VERSION = "0.19.0"
+VERSION = "0.20.0"
 
 DB_FILENAME = "mb_logbook.db"
 STORAGE_VERSION = 1
@@ -26,6 +26,7 @@ CONF_STOP_MINUTES = "stop_minutes"
 CONF_MIN_DISTANCE = "min_distance_km"
 CONF_DISTANCE_UNIT = "distance_unit"
 CONF_OUTSIDE_TEMP = "outside_temp_entity"
+CONF_CURRENCY = "currency"
 CONF_SUMMARY_NOTIFY = "summary_notify"
 
 DEFAULT_STOP_MINUTES = 3

@@ -33,6 +33,7 @@ from .const import (
     CONF_CHARGE_POWER,
     CONF_CHARGER_ENERGY,
     CONF_CHARGING,
+    CONF_CURRENCY,
     CONF_DISTANCE_UNIT,
     CONF_HOME_ZONE,
     CONF_IGNITION,
@@ -56,6 +57,8 @@ from .const import (
 )
 
 CONF_DEVICE = "device_id"
+# Currencies for charging costs (any ISO 4217 code can be typed in)
+CURRENCIES = ["GBP", "EUR", "USD", "CHF", "SEK", "NOK", "DKK", "PLN", "CZK", "HUF", "AUD", "NZD", "CAD", "JPY", "CNY", "KRW", "INR", "ZAR"]
 
 
 def _detect(hass: HomeAssistant, device_id: str) -> tuple[dict[str, str], str | None]:
@@ -118,6 +121,9 @@ def _schema(hass: HomeAssistant, d: dict[str, Any], with_name: bool) -> vol.Sche
                 CONF_CHARGER_ENERGY,
                 description={"suggested_value": d.get(CONF_CHARGER_ENERGY)},
             ): EntitySelector(EntitySelectorConfig(domain="sensor", device_class="energy")),
+            vol.Required(
+                CONF_CURRENCY, default=d.get(CONF_CURRENCY) or hass.config.currency or "EUR"
+            ): SelectSelector(SelectSelectorConfig(options=CURRENCIES, custom_value=True, sort=False)),
             vol.Optional(
                 CONF_PRICE, description={"suggested_value": d.get(CONF_PRICE)}
             ): sens,

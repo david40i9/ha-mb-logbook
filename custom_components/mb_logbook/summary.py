@@ -12,6 +12,7 @@ from homeassistant.util import dt as dt_util
 from .const import (
     CONF_CAPACITY,
     CONF_CAR_NAME,
+    CONF_CURRENCY,
     CONF_DISTANCE_UNIT,
     CONF_SUMMARY_NOTIFY,
     IDLE_MIN_HOURS,
@@ -62,7 +63,7 @@ async def async_build(hass: HomeAssistant, logger: CarLogger, now: datetime) -> 
         )
         lines.append(f"Used about {kwh:.0f} kWh driving ({eff})")
     if t["charges"]:
-        cost = f", {_money(hass.config.currency, t['charge_cost'])}" if t["charge_cost"] else ""
+        cost = f", {_money(conf.get(CONF_CURRENCY) or hass.config.currency, t['charge_cost'])}" if t["charge_cost"] else ""
         lines.append(f"Charged {t['charged_kwh']:.0f} kWh in {t['charges']} sessions{cost}")
     hours = sum(h for h, _ in parks)
     if hours:

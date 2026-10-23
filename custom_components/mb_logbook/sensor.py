@@ -24,7 +24,7 @@ from homeassistant.util import dt as dt_util
 from .const import (
     CONF_CAPACITY,
     CONF_DISTANCE_UNIT,
-    CONF_PRICE,
+    CONF_CURRENCY,
     IDLE_MIN_HOURS,
     KM_PER_MI,
     SIGNAL_UPDATED,
@@ -204,12 +204,10 @@ def _descriptions(miles: bool, currency: str | None) -> list[LogbookSensorDescri
     return descs
 
 
-def _currency(hass: HomeAssistant, price_entity: str | None) -> str | None:
-    if not price_entity:
-        return None
-    # Costs are stored in whole currency units (a p/kWh or c/kWh price is converted),
-    # so they are in Home Assistant's own currency whatever the price sensor says.
-    return hass.config.currency
+def _currency(hass: HomeAssistant, conf: dict) -> str:
+    # Costs come from the price sensor (converted to whole units) or the Charging-tab
+    # rates, both in the currency chosen for the car (default: Home Assistant's).
+    return conf.get(CONF_CURRENCY) or hass.config.currency
 
 
 async def async_setup_entry(
@@ -217,7 +215,7 @@ async def async_setup_entry(
 ) -> None:
     stats = Stats(hass, entry)
     conf = entry_conf(entry)
-    descs = _descriptions(stats.miles, _currency(hass, conf.get(CONF_PRICE)))
+    descs = _descriptions(stats.miles, _currency(hass, conf))
     stats.entities = [LogbookSensor(entry, stats, d) for d in descs]
     await stats.async_refresh()
     async_add_entities(stats.entities)

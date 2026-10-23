@@ -14,7 +14,10 @@ import json
 import math
 import sqlite3
 import threading
+from datetime import datetime, time, timedelta
 from typing import Any
+
+from homeassistant.util import dt as dt_util
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS trips (
@@ -95,6 +98,10 @@ MIGRATIONS = (
     ("charges", "lon", "REAL"),
     ("charges", "cost_basis", "TEXT"),
     ("trips", "temp_c", "REAL"),
+    # Optional cheaper rate for a daily window (e.g. 00:30–05:30 on an EV tariff)
+    ("charge_rates", "offpeak_rate", "REAL"),
+    ("charge_rates", "offpeak_start", "TEXT"),
+    ("charge_rates", "offpeak_end", "TEXT"),
 )
 
 TRIP_COLS = (
@@ -128,6 +135,38 @@ def rate_at(rates: list[dict[str, Any]], ts: float) -> dict[str, Any] | None:
         else:
             break
     return current
+
+
+def _offpeak_share(start_ts: float, end_ts: float, start: str, end: str) -> float:
+    """Share of [start_ts, end_ts] inside the daily local-time window start–end
+    ("HH:MM"; a window may cross midnight, e.g. 23:30–05:30)."""
+    if end_ts <= start_ts:
+        end_ts = start_ts + 1
+    sh, sm = (int(x) for x in start.split(":"))
+    eh, em = (int(x) for x in end.split(":"))
+    first = dt_util.as_local(dt_util.utc_from_timestamp(start_ts)).date() - timedelta(days=1)
+    last = dt_util.as_local(dt_util.utc_from_timestamp(end_ts)).date()
+    inside = 0.0
+    day = first
+    while day <= last:
+        w0 = datetime.combine(day, time(sh, sm), dt_util.get_default_time_zone()).timestamp()
+        w1 = datetime.combine(day, time(eh, em), dt_util.get_default_time_zone()).timestamp()
+        if w1 <= w0:
+            w1 += 86400
+        inside += max(0.0, min(end_ts, w1) - max(start_ts, w0))
+        day += timedelta(days=1)
+    return min(1.0, inside / (end_ts - start_ts))
+
+
+def rate_for(entry: dict[str, Any], start_ts: float, end_ts: float | None) -> float:
+    """The price per kWh for a session: the entry's rate, blended with its off-peak
+    rate by how much of the session fell in the off-peak window."""
+    rate = entry["rate"]
+    off = entry.get("offpeak_rate")
+    if off is None or not entry.get("offpeak_start") or not entry.get("offpeak_end"):
+        return rate
+    share = _offpeak_share(start_ts, end_ts or start_ts, entry["offpeak_start"], entry["offpeak_end"])
+    return rate * (1 - share) + off * share
 
 
 # A stop this close to a point a place was named from gets that name, even if
@@ -262,13 +301,14 @@ class LogbookDB:
         return out
 
     def save_rate(self, rate: dict[str, Any]) -> int:
+        cols = ("location", "valid_from", "rate", "offpeak_rate", "offpeak_start", "offpeak_end")
         if rate.get("id"):
             self._exec(
-                "UPDATE charge_rates SET location = ?, valid_from = ?, rate = ? WHERE id = ?",
-                (rate["location"], rate["valid_from"], rate["rate"], rate["id"]),
+                f"UPDATE charge_rates SET {', '.join(c + ' = ?' for c in cols)} WHERE id = ?",
+                (*(rate.get(c) for c in cols), rate["id"]),
             )
             return int(rate["id"])
-        return self._insert("charge_rates", ("location", "valid_from", "rate"), rate)
+        return self._insert("charge_rates", cols, rate)
 
     def delete_rate(self, rate_id: int) -> None:
         self._exec("DELETE FROM charge_rates WHERE id = ?", (rate_id,))
@@ -534,9 +574,10 @@ class LogbookDB:
         entry = rate_at(rates.get(d.get("place") or "", []), d["start_ts"])
         if entry is None or kwh is None:
             return
-        d["rate"] = entry["rate"]
-        d["cost"] = round(kwh * entry["rate"], 4)
-        d["cost_source"] = "free" if entry["rate"] == 0 else "rate"
+        rate = rate_for(entry, d["start_ts"], d.get("end_ts"))
+        d["rate"] = round(rate, 5)
+        d["cost"] = round(kwh * rate, 4)
+        d["cost_source"] = "free" if rate == 0 else "rate"
 
     def last_charge(self, car: str) -> dict[str, Any] | None:
         rows = self.charges(car, 0, 1e12, limit=1)

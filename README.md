@@ -96,7 +96,7 @@ Check your model year's spec sheet; capacities changed between versions. Everyth
 | Ignition state | Optional | The most precise trip start and end (otherwise trips are detected from the car moving) |
 | Trip distance counter | Optional | 0.1-mile/km trip distances when the odometer only reports whole units |
 | Charging active, charging power | Optional | Charging sessions and peak power |
-| Electricity price sensor | Optional | Home charges costed at the live price (per kWh or MWh, in pounds, pence, euros, cents, öre…; converted automatically) |
+| Electricity price sensor | Optional | Live price for home charges (per kWh or MWh, pounds, pence, euros, cents, öre…; converted automatically). Without one, home charges use the rates you set in the Charging tab |
 | Home charger energy meter | Optional | The most accurate home energy and cost (any total-kWh sensor: Zappi, Wallbox, smart plug…) |
 | Outside temperature | Optional | Defaults to Home Assistant's weather for your home; or pick any temperature sensor |
 
@@ -110,7 +110,7 @@ Any car that provides these entities works, not only Mercedes. Pick them yoursel
 
 **Places.** A stop outside your Home Assistant zones shows as *unnamed · name it*. Name it and drag the circle to fit; every past and future trip or charge there takes the name. Press **Suggest names** for nearby shops and venues from OpenStreetMap.
 
-**Charging rates.** Give any charging place a price per kWh, or mark it free, from a date. Each charge is costed at the rate in force when it started, so a new rate never changes older charges.
+**Charging rates.** Give any charging place, Home included, a price per kWh (or mark it free) from a date, with an optional off-peak price and time window for EV tariffs (for example 7p from 00:30 to 05:30). Each charge is costed at the rate in force when it started, split by how much of it fell in the off-peak window, so a new rate never changes older charges. No price sensor or energy integration is needed. Costs are shown in the currency chosen in the car's options.
 
 **Fixing trips.** Open a trip for **Split at the stop** (two drives logged as one, for example after the car lost signal in an underground car park), **Merge with next trip**, or **Delete this trip**.
 

@@ -86,7 +86,11 @@ def add_power_sample(
 
 
 def charge_cost(charge: dict[str, Any], has_price: bool) -> tuple[float | None, str | None]:
-    """(cost, basis) for a finished session: home meter first, else charging power."""
+    """(cost, basis) for a finished session at the live price sensor: home meter first,
+    else charging power. Without a price sensor there is no live cost (None), and the
+    charge is costed at its place's rate from the Charging tab instead."""
+    if not has_price:
+        return None, None
     meter = charge.get("kwh_meter") or 0.0
     if meter > 0:
         return round(charge.get("cost") or 0.0, 4), "meter"

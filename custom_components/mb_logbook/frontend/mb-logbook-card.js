@@ -190,8 +190,12 @@ class MBLogbookCard extends HTMLElement {
     return new Date(ts * 1000).toLocaleDateString(this._hass.locale?.language, { day: "numeric", month: "short", year: "numeric" });
   }
 
-  _rateText(rate) {
-    return rate === 0 ? "Free" : `${this._money(rate, true)}/kWh`;
+  /** A rate entry as text: "£0.245/kWh · off-peak £0.07 00:30–05:30". Accepts a number too. */
+  _rateText(r) {
+    const e = typeof r === "number" ? { rate: r } : r;
+    if (e.rate === 0 && e.offpeak_rate == null) return "Free";
+    const off = e.offpeak_rate != null && e.offpeak_start ? ` · off-peak ${this._money(e.offpeak_rate, true)} ${e.offpeak_start}–${e.offpeak_end}` : "";
+    return `${this._money(e.rate, true)}/kWh${off}`;
   }
 
   /** Places tab: a default trip label for each place trips go to. */
@@ -227,24 +231,27 @@ class MBLogbookCard extends HTMLElement {
         const hist = r.rates.filter((x) => x.location === loc.location).sort((a, b) => a.valid_from - b.valid_from);
         const current = [...hist].reverse().find((x) => x.valid_from <= now);
         const cur = current
-          ? `${this._rateText(current.rate)} <span class=dim>since ${this._date(current.valid_from)}</span>`
+          ? `${this._rateText(current)} <span class=dim>since ${this._date(current.valid_from)}</span>`
           : `<span class=dim>–</span>`;
         const open = this._openRate === i;
         const histRows = hist.length
           ? hist
               .map(
-                (x) => `<div class=ratehist>From ${this._date(x.valid_from)}: <b>${this._rateText(x.rate)}</b>${x.valid_from > now ? " <span class=chip>upcoming</span>" : ""}
+                (x) => `<div class=ratehist>From ${this._date(x.valid_from)}: <b>${this._rateText(x)}</b>${x.valid_from > now ? " <span class=chip>upcoming</span>" : ""}
                   ${admin ? `<button class=ratedel data-rate="${x.id}">Delete</button>` : ""}</div>`
               )
               .join("")
-          : `<div class=dim>No rates yet. Charges here have no cost${loc.metered ? " unless metered" : ""}.</div>`;
+          : `<div class=dim>No rates yet. Charges here have no cost${loc.metered && this._car?.has_price ? " unless metered" : ""}.</div>`;
         const form = admin
           ? `<div class=nameform>
                <span>New rate from</span><input type=date class=rdate value="${today}">
-               <input type=number class=rrate min=0 max=10000 step=0.001 placeholder="${esc(this._hass.config.currency || "")} per kWh, e.g. 0.79">
+               <input type=number class=rrate min=0 max=10000 step=0.001 placeholder="${esc(this._cur)} per kWh, e.g. 0.79">
                <label class=dim><input type=checkbox class=rfree> Free</label>
+               <span class=offpeak><span>Off-peak (optional)</span>
+                 <input type=number class=roff min=0 max=10000 step=0.001 placeholder="per kWh, e.g. 0.07">
+                 <span>from</span><input type=time class=roffs value="00:30"><span>to</span><input type=time class=roffe value="05:30"></span>
                <button class="primary rsave" data-loc="${i}">Add rate</button>
-               <div class=dim>Charges from that date on use the new rate; earlier charges keep the rate they had. Metered home charges always use the meter.</div>
+               <div class=dim>Charges from that date on use the new rate; earlier charges keep the rate they had. With an off-peak price, each charge is costed by how much of it fell in that window every day.${this._car?.has_price ? " Home charges use your live price sensor instead." : ""}</div>
              </div>`
           : "";
         return `<tr><td>${esc(loc.location)}</td><td>${cur}</td><td class=n>${loc.charges}</td>
@@ -437,10 +444,15 @@ class MBLogbookCard extends HTMLElement {
     return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m` : `${m} min`;
   }
 
-  /** Money in HA's currency and number format. perKwh: up to 3 decimals (7.5p, not 8p). */
+  /** The currency chosen for the car (falls back to Home Assistant's). */
+  get _cur() {
+    return this._car?.currency || this._hass?.config?.currency || "EUR";
+  }
+
+  /** Money in the car's currency, in the user's number format. perKwh: up to 3 decimals (7.5p, not 8p). */
   _money(v, perKwh = false) {
     if (v == null) return "–";
-    const cur = this._hass.config.currency || "GBP";
+    const cur = this._cur;
     try {
       return new Intl.NumberFormat(this._hass.locale?.language, {
         style: "currency",
@@ -597,7 +609,7 @@ class MBLogbookCard extends HTMLElement {
 
   _exportChargesCsv() {
     const loc = this._hass.locale?.language;
-    const cur = this._hass.config?.currency || "";
+    const cur = this._cur;
     const rows = [["Date", "Start time", "End time", "Place", "Latitude", "Longitude", "Battery start %", "Battery end %", "Energy (kWh)", "Energy source", "Peak power (kW)", `Cost (${cur})`, "Cost basis", `Per kWh (${cur})`]];
     for (const c of [...this._charges].sort((a, b) => a.start_ts - b.start_ts)) {
       const s = new Date(c.start_ts * 1000);
@@ -886,8 +898,16 @@ class MBLogbookCard extends HTMLElement {
         const rate = free ? 0 : Number(row.querySelector(".rrate").value);
         const date = row.querySelector(".rdate").value;
         if (!date || (!free && !(rate > 0))) return alert("Enter a rate per kWh (or tick Free) and a start date.");
+        const msg = { type: "mb_logbook/rate_save", location: loc, valid_from: date, rate };
+        const offRate = row.querySelector(".roff").value;
+        if (!free && offRate !== "") {
+          const from = row.querySelector(".roffs").value;
+          const to = row.querySelector(".roffe").value;
+          if (!from || !to || from === to) return alert("Give the off-peak window a start and end time (for example 00:30 to 05:30).");
+          Object.assign(msg, { offpeak_rate: Number(offRate), offpeak_start: from, offpeak_end: to });
+        }
         try {
-          await this._hass.callWS({ type: "mb_logbook/rate_save", location: loc, valid_from: date, rate });
+          await this._hass.callWS(msg);
         } catch (e) {
           return alert(`Couldn't save the rate: ${e.message || e.code || e}`);
         }
@@ -1157,6 +1177,9 @@ MBLogbookCard.css = `
   button.nameit { background: none; border: 1px dashed var(--divider-color); border-radius: 8px; color: var(--secondary-text-color); font: inherit; font-size: .85em; padding: 1px 6px; cursor: pointer; }
   button.nameit:hover { color: var(--primary-color); border-color: var(--primary-color); }
   .nameform { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0 10px; }
+  .offpeak { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .nameform label { display: inline-flex; align-items: center; gap: 4px; }
+  .nameform input[type=checkbox] { width: auto; margin: 0; }
   .nameform input, td input.pn { flex: 1; min-width: 160px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); font: inherit; }
   .nameform select, td select.pr { padding: 6px; border-radius: 8px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); font: inherit; }
   .nameform button, td button.psv, td button.pdel { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--divider-color); background: none; color: var(--primary-text-color); font: inherit; cursor: pointer; }
@@ -1169,7 +1192,7 @@ MBLogbookCard.css = `
   #mapbox ha-map { height: 100%; display: block; }
 `;
 
-const CARD_VERSION = "0.19.0";
+const CARD_VERSION = "0.20.0";
 
 if (!customElements.get("mb-logbook-card")) {
   customElements.define("mb-logbook-card", MBLogbookCard);

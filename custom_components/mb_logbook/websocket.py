@@ -22,8 +22,10 @@ from .const import (
     CONF_CAR_NAME,
     CONF_CHARGER_ENERGY,
     CONF_DISTANCE_UNIT,
+    CONF_CURRENCY,
     CONF_HOME_ZONE,
     CONF_ODOMETER,
+    CONF_PRICE,
     CONF_RANGE,
     CONF_SOC,
     DOMAIN,
@@ -303,6 +305,10 @@ def _local_midnight(date_str: str) -> float:
         vol.Required("location"): vol.All(str, vol.Strip, vol.Length(min=1, max=60)),
         vol.Required("valid_from"): str,  # YYYY-MM-DD, local
         vol.Required("rate"): vol.All(vol.Coerce(float), vol.Range(min=0, max=10000)),
+        # Optional off-peak price for a daily window, e.g. 0.07 from "00:30" to "05:30"
+        vol.Optional("offpeak_rate"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=10000))),
+        vol.Optional("offpeak_start"): vol.Any(None, vol.Match(r"^([01]\d|2[0-3]):[0-5]\d$")),
+        vol.Optional("offpeak_end"): vol.Any(None, vol.Match(r"^([01]\d|2[0-3]):[0-5]\d$")),
     }
 )
 @websocket_api.async_response
@@ -315,7 +321,15 @@ async def ws_rate_save(hass: HomeAssistant, connection, msg: dict[str, Any]) -> 
         return
     rate_id = await hass.async_add_executor_job(
         db.save_rate,
-        {"id": msg.get("rate_id"), "location": msg["location"], "valid_from": valid_from, "rate": msg["rate"]},
+        {
+            "id": msg.get("rate_id"), "location": msg["location"], "valid_from": valid_from, "rate": msg["rate"],
+            # all three or none
+            **(
+                {k: msg[k] for k in ("offpeak_rate", "offpeak_start", "offpeak_end")}
+                if all(msg.get(k) is not None for k in ("offpeak_rate", "offpeak_start", "offpeak_end"))
+                else {}
+            ),
+        },
     )
     _refresh_all(hass)
     connection.send_result(msg["id"], {"id": rate_id})
@@ -599,6 +613,8 @@ def ws_cars(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
                 "unit": conf.get(CONF_DISTANCE_UNIT, UNIT_KM),
                 "capacity_kwh": conf.get(CONF_CAPACITY),
                 "has_meter": bool(conf.get(CONF_CHARGER_ENERGY)),
+                "has_price": bool(conf.get(CONF_PRICE)),
+                "currency": conf.get(CONF_CURRENCY) or hass.config.currency,
                 "trip_active": logger.trip_active,
                 "charge_active": logger.charge_active,
             }

@@ -86,7 +86,7 @@ class MBLogbookPanel extends HTMLElement {
     try {
       return new Intl.NumberFormat(this._hass.locale?.language, {
         style: "currency",
-        currency: this._hass.config.currency || "GBP",
+        currency: this._car?.currency || this._hass.config.currency || "EUR",
       }).format(v);
     } catch (e) {
       return v.toFixed(2);
